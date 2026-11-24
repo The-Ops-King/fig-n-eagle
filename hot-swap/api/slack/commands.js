@@ -4,6 +4,7 @@
 //   /hotswap tomorrow   build/refresh TOMORROW's plan now (manager only; alias: plan)
 //   /hotswap add @name | remove @name   change the pool (manager only)
 //   /hotswap pool       list who's in the pool
+//   /hotswap dates      coverage exceptions by date / weekday (manager only)
 //   /hotswap help       explain commands and buttons
 // Request URL: https://<deployment>/api/slack/commands
 import { waitUntil } from '@vercel/functions';
@@ -11,7 +12,7 @@ import { verifySlackSignature } from '../../lib/slack.js';
 import { baseContext, context, resetTeamCache } from '../../lib/context.js';
 import { dateKey, nextDateKey, formatDay } from '../../lib/time.js';
 import * as svc from '../../lib/service.js';
-import { loadingView, messageView, requestView } from '../../lib/views.js';
+import { loadingView, messageView, requestView, datesView } from '../../lib/views.js';
 
 const HELP = [
   '*Hot Swap: who takes a closer\'s call when they can\'t.*',
@@ -29,6 +30,7 @@ const HELP = [
   '*Manager*',
   '• `/hotswap today` / `/hotswap tomorrow`: build or refresh the roster now (fills open hours, keeps existing assignments).',
   '• `/hotswap add @name` / `/hotswap remove @name`: add someone to the pool (e.g. a setter) or take them out (frees their hours).',
+  '• `/hotswap dates`: turn coverage off or change the hours for a date (holidays) or every week on a weekday (weekends).',
   '',
   '_Schedule: tomorrow\'s plan posts at 6 PM ET, today\'s roster at 7 AM ET. On-call hours appear on your GHL and Google calendar as "(Name) Hot Swap On-Call"._',
 ].join('\n');
@@ -75,6 +77,19 @@ export async function POST(request) {
       return followUp(responseUrl, `Updated the ${phase === 'plan' ? 'plan' : 'roster'} for ${formatDay(day)}. ${gaps}${errs}`);
     }).catch((e) => { console.error(e); return followUp(responseUrl, `Something went wrong: ${e.message}`); }));
     return ephemeral(`Building ${sub === 'tomorrow' ? "tomorrow's plan" : "today's roster"}…`);
+  }
+
+  if (sub === 'dates') {
+    const title = 'Hot-swap coverage';
+    const { view } = await base.slack.openView(form.get('trigger_id'), loadingView(title));
+    waitUntil(context(base).then(async (ctx) => {
+      if (ctx.team.manager.slackUserId !== user) {
+        return base.slack.updateView(view.id, messageView(title, `Only ${ctx.team.manager.name} can change coverage dates.`));
+      }
+      const tomorrow = nextDateKey(dateKey(Date.now(), base.cfg.timezone));
+      return base.slack.updateView(view.id, datesView(await svc.upcomingCoverage(base.cfg), tomorrow));
+    }).catch((e) => { console.error(e); return base.slack.updateView(view.id, messageView(title, `Something went wrong: ${e.message}`)); }));
+    return new Response(null, { status: 200 });
   }
 
   if (sub === 'add' || sub === 'remove' || sub === 'pool') {

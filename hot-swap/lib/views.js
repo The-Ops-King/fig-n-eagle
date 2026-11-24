@@ -107,3 +107,45 @@ export function volunteerView(day, hours) {
     ],
   };
 }
+
+const hourOpt = (h) => ({ text: plain(hourLabel(h)), value: String(h) });
+
+// upcoming: [{ day, label, source }]
+export function datesView(upcoming, initialDay) {
+  const lines = upcoming.map((u) => `${u.source === 'default' ? '' : '*'}${formatDayShort(u.day)}: ${u.label}${u.source === 'default' ? '' : '*'}${u.source === 'weekday' ? ' _(weekly)_' : ''}`);
+  return {
+    type: 'modal',
+    callback_id: 'dates_submit',
+    title: plain('Hot-swap coverage'),
+    submit: plain('Save'),
+    close: plain('Close'),
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: `*Next 14 days* (ET, changes in bold)\n${lines.join('\n')}` } },
+      { type: 'divider' },
+      { type: 'input', block_id: 'day', label: plain('Date'), element: { type: 'datepicker', action_id: 'value', initial_date: initialDay } },
+      {
+        type: 'input', block_id: 'scope', label: plain('Apply to'),
+        element: { type: 'radio_buttons', action_id: 'value', initial_option: { text: plain('This date only'), value: 'date' },
+          options: [{ text: plain('This date only'), value: 'date' }, { text: plain('Every week on this weekday'), value: 'weekday' }] },
+      },
+      {
+        type: 'input', block_id: 'mode', label: plain('Coverage'),
+        element: { type: 'radio_buttons', action_id: 'value', initial_option: { text: plain('Off (no coverage)'), value: 'off' },
+          options: [
+            { text: plain('Off (no coverage)'), value: 'off' },
+            { text: plain('Custom hours'), value: 'hours' },
+            { text: plain('Normal (remove the exception)'), value: 'normal' },
+          ] },
+      },
+      { type: 'input', block_id: 'from', optional: true, label: plain('From (custom hours)'),
+        element: { type: 'static_select', action_id: 'value', options: Array.from({ length: 17 }, (_, i) => hourOpt(6 + i)) } },
+      { type: 'input', block_id: 'until', optional: true, label: plain('Until (custom hours)'),
+        element: { type: 'static_select', action_id: 'value', options: Array.from({ length: 17 }, (_, i) => hourOpt(7 + i)) } },
+    ],
+  };
+}
+
+function formatDayShort(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(Date.UTC(y, m - 1, d)));
+}

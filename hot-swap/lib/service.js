@@ -1,5 +1,5 @@
 // Orchestration: GHL + Slack + DB. Each exported function is one user-visible action.
-import { coverageHours, headcountFor } from './config.js';
+import { coverageHours, headcountFor, dayCoverage } from './config.js';
 import { slotsToIntervals, freeHours } from './availability.js';
 import { planRoster } from './roster.js';
 import { HOUR, dateKey, nextDateKey, hourStart, hourLabel, formatDay, formatTime, weekdayOf } from './time.js';
@@ -102,9 +102,21 @@ export async function availability(cfg, ghl, people, day, hours) {
 
 // Hours still worth covering: configured window, skip the day if not a coverage day,
 // skip hours that have already ended.
-export function hoursToCover(cfg, day, now = Date.now()) {
-  if (!cfg.coverage.days.includes(weekdayOf(day))) return [];
-  return coverageHours(cfg).filter((h) => hourStart(day, h, cfg.timezone) + HOUR > now);
+export async function loadRules(cfg) {
+  return store.coverageRules(cfg.client).catch((e) => {
+    if (!/DATABASE_URL/.test(e.message)) console.error('coverage rules', e.message);
+    return [];
+  });
+}
+
+// All coverage hours for the day after applying /hotswap dates rules.
+export async function hoursForDay(cfg, day, rules) {
+  return dayCoverage(cfg, day, rules ?? await loadRules(cfg), weekdayOf(day)).hours;
+}
+
+// Coverage hours that haven't ended yet.
+export async function hoursToCover(cfg, day, now = Date.now(), rules) {
+  return (await hoursForDay(cfg, day, rules)).filter((h) => hourStart(day, h, cfg.timezone) + HOUR > now);
 }
 
 // ---------- roster ----------
@@ -112,7 +124,7 @@ export function hoursToCover(cfg, day, now = Date.now()) {
 // Plan (and optionally apply) the roster for `day`.
 // apply=false: preview only (evening gap check). apply=true: create GHL blocks + DB rows.
 export async function buildRoster(cfg, { ghl, team, day, apply, now = Date.now() }) {
-  const hours = hoursToCover(cfg, day, now);
+  const hours = await hoursToCover(cfg, day, now);
   if (!hours.length) return { day, hours, assignments: new Map(), gaps: [], errors: [] };
 
   const repairErrors = apply ? await repairSlots(cfg, ghl, team, day) : [];
@@ -214,9 +226,8 @@ async function currentRoster(cfg, day) {
   return byHour;
 }
 
-export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = Date.now() } = {}) {
+export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = Date.now(), hours = [] } = {}) {
   const name = (id) => team.byId.get(id);
-  const hours = cfg.coverage.days.includes(weekdayOf(day)) ? coverageHours(cfg) : [];
   const lines = hours.map((h) => {
     const ids = (byHour.get(h) || []).map((r) => r.ghl_user_id ?? r);
     const want = headcountFor(cfg, h);
@@ -229,7 +240,7 @@ export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = 
   const text = `${phase === 'plan' ? "Tomorrow's hot-swap plan" : "Today's hot-swap roster"}: ${formatDay(day)} (ET)`;
   const blocks = [
     { type: 'header', text: { type: 'plain_text', text } },
-    { type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') || '_No coverage hours today._' } },
+    { type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') || '_No hot-swap coverage scheduled for this day._' } },
     { type: 'context', elements: [{ type: 'mrkdwn', text: 'Times are ET. Your on-call hours are on your GHL and Google calendar, so round robin won\'t book you then. If a transfer comes in during your hour, claim it.' }] },
     {
       type: 'actions',
@@ -262,7 +273,7 @@ export async function publishRoster(cfg, { ghl, slack, team, day, phase, fresh =
     ];
   }
   const byHour = await currentRoster(cfg, day);
-  const msg = renderRoster(cfg, team, day, byHour, { phase });
+  const msg = renderRoster(cfg, team, day, byHour, { phase, hours: await hoursForDay(cfg, day) });
   await clearCoverMessages(cfg, slack, day).catch((e) => result.errors.push(`Cleaning up cover messages: ${e.message}`));
   const prev = fresh ? null : await store.getRosterPost(cfg.client, day);
   if (prev) {
@@ -290,7 +301,7 @@ async function refreshRosterMessage(cfg, { slack, team, day }) {
   if (!post) return;
   const byHour = await currentRoster(cfg, day);
   const today = dateKey(Date.now(), cfg.timezone);
-  const msg = renderRoster(cfg, team, day, byHour, { phase: day > today ? 'plan' : 'confirm' });
+  const msg = renderRoster(cfg, team, day, byHour, { phase: day > today ? 'plan' : 'confirm', hours: await hoursForDay(cfg, day) });
   await slack.update(post.channel, post.ts, msg.text, msg.blocks);
 }
 
@@ -385,10 +396,12 @@ export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUse
 // so the channel only shows hours that still need someone.
 export async function clearCoverMessages(cfg, slack, day) {
   const byHour = await currentRoster(cfg, day);
+  const hours = await hoursForDay(cfg, day);
   for (const m of await store.coverMessages(cfg.client, day)) {
     const full = (byHour.get(m.hour) || []).length >= headcountFor(cfg, m.hour);
     const over = hourStart(day, m.hour, cfg.timezone) + HOUR <= Date.now();
-    if (!full && !over) continue;
+    const dropped = !hours.includes(m.hour);
+    if (!full && !over && !dropped) continue;
     await slack.remove(m.channel, m.ts).catch((e) => { if (e.slackError !== 'message_not_found') throw e; });
     await store.removeCoverMessage(m.channel, m.ts);
   }
@@ -406,13 +419,13 @@ export async function sweepCoverMessages(cfg, slack, now = Date.now()) {
 
 export async function openHoursFor(cfg, day) {
   const byHour = await currentRoster(cfg, day);
-  return hoursToCover(cfg, day).filter((h) => (byHour.get(h) || []).length < headcountFor(cfg, h));
+  return (await hoursToCover(cfg, day)).filter((h) => (byHour.get(h) || []).length < headcountFor(cfg, h));
 }
 
 // Remaining hours that still need people (including the one under way).
 export async function coverableHours(cfg, day) {
   const byHour = await currentRoster(cfg, day);
-  return hoursToCover(cfg, day)
+  return (await hoursToCover(cfg, day))
     .map((h) => ({ hour: h, count: (byHour.get(h) || []).length, need: headcountFor(cfg, h) - (byHour.get(h) || []).length }))
     .filter((h) => h.need > 0);
 }
@@ -424,6 +437,57 @@ export async function myFutureSlots(cfg, team, day, slackUserId) {
     return (p?.slackUserId === slackUserId || isManager(team, slackUserId))
       && hourStart(day, r.hour, cfg.timezone) + HOUR > Date.now();
   });
+}
+
+// ---------- coverage exceptions (/hotswap dates) ----------
+
+const describeCoverage = (dc) => {
+  if (!dc.hours.length) return 'Off';
+  const range = `${hourLabel(dc.hours[0])}–${hourLabel(dc.hours[dc.hours.length - 1] + 1)}`;
+  return dc.source === 'default' ? `Normal (${range})` : range;
+};
+
+export async function upcomingCoverage(cfg, days = 14, now = Date.now()) {
+  const rules = await loadRules(cfg);
+  const out = [];
+  let day = dateKey(now, cfg.timezone);
+  for (let i = 0; i < days; i++) {
+    const dc = dayCoverage(cfg, day, rules, weekdayOf(day));
+    out.push({ day, label: describeCoverage(dc), source: dc.source });
+    day = nextDateKey(day);
+  }
+  return out;
+}
+
+// Save a rule, then bring today's/tomorrow's roster in line right away.
+export async function setCoverage(cfg, ctx, { day, scope, mode, firstHour, lastHour, by }) {
+  const kind = scope === 'weekday' ? 'weekday' : 'date';
+  const key = kind === 'date' ? day : String(weekdayOf(day));
+  if (mode === 'normal') await store.clearCoverageRule(cfg.client, kind, key);
+  else await store.setCoverageRule({ client: cfg.client, kind, key, mode, firstHour, lastHour, by });
+
+  const today = dateKey(Date.now(), cfg.timezone);
+  const affected = [today, nextDateKey(today)].filter((d) => (kind === 'date' ? d === day : weekdayOf(d) === weekdayOf(day)));
+  for (const d of affected) await applyCoverageChange(cfg, ctx, d);
+
+  const what = mode === 'normal' ? 'normal coverage' : mode === 'off' ? 'no coverage' : `${hourLabel(firstHour)}–${hourLabel(lastHour + 1)} ET`;
+  const when = kind === 'date' ? formatDay(day) : `every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekdayOf(day)]}`;
+  return { ok: true, message: `Saved: ${when} → ${what}.${affected.length ? ' Updated the roster.' : ''}` };
+}
+
+// Cancel on-call hours that are no longer covered, drop their cover requests, refill new hours.
+async function applyCoverageChange(cfg, ctx, day) {
+  const hours = await hoursForDay(cfg, day);
+  for (const slot of await store.activeSlots(cfg.client, day)) {
+    if (hours.includes(slot.hour) || hourStart(day, slot.hour, cfg.timezone) + HOUR <= Date.now()) continue;
+    if (slot.block_event_id) await ctx.ghl.deleteEvent(slot.block_event_id).catch((e) => console.error('cancel on-call failed', e.message));
+    await store.releaseSlot(slot.id);
+  }
+  await clearCoverMessages(cfg, ctx.slack, day);
+  const today = dateKey(Date.now(), cfg.timezone);
+  if (await store.getRosterPost(cfg.client, day)) {
+    await publishRoster(cfg, { ...ctx, day, phase: day > today ? 'plan' : 'confirm', fresh: false });
+  }
 }
 
 // ---------- pool management from Slack ----------

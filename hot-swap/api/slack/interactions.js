@@ -86,6 +86,31 @@ export async function POST(request) {
       case 'release_submit':
         background((ctx) => svc.releaseHour(cfg, { ...ctx, day: v.private_metadata, slotId: sel('slot'), slackUserId: user }));
         break;
+      case 'dates_submit': {
+        const vals = v.state.values;
+        const day = vals.day?.value?.selected_date;
+        const scope = vals.scope?.value?.selected_option?.value || 'date';
+        const mode = vals.mode?.value?.selected_option?.value;
+        const from = vals.from?.value?.selected_option?.value;
+        const until = vals.until?.value?.selected_option?.value;
+        const errors = {};
+        if (!day) errors.day = 'Pick a date.';
+        if (mode === 'hours') {
+          if (!from) errors.from = 'Pick a start time.';
+          if (!until) errors.until = 'Pick an end time.';
+          if (from && until && Number(until) <= Number(from)) errors.until = 'End must be after start.';
+        }
+        if (Object.keys(errors).length) return json({ response_action: 'errors', errors });
+        background(async (ctx) => {
+          if (ctx.team.manager.slackUserId !== user) return { message: `Only ${ctx.team.manager.name} can change coverage dates.` };
+          return svc.setCoverage(cfg, ctx, {
+            day, scope, mode, by: user,
+            firstHour: mode === 'hours' ? Number(from) : null,
+            lastHour: mode === 'hours' ? Number(until) - 1 : null,
+          });
+        });
+        break;
+      }
       case 'volunteer_submit':
         background((ctx) => svc.volunteerHour(cfg, { ...ctx, day: v.private_metadata, hour: Number(sel('hour')), slackUserId: user }));
         break;

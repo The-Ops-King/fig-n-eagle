@@ -137,3 +137,20 @@ export async function staleCoverMessages(client, beforeDay) {
 export async function removeCoverMessage(channel, ts) {
   await db()`DELETE FROM cover_messages WHERE channel = ${channel} AND ts = ${ts}`;
 }
+
+export async function coverageRules(client) {
+  return db()`SELECT * FROM coverage_rules WHERE client = ${client}`;
+}
+
+export async function setCoverageRule({ client, kind, key, mode, firstHour, lastHour, by }) {
+  await db()`
+    INSERT INTO coverage_rules (client, kind, key, mode, first_hour, last_hour, updated_by)
+    VALUES (${client}, ${kind}, ${key}, ${mode}, ${firstHour}, ${lastHour}, ${by})
+    ON CONFLICT (client, kind, key) DO UPDATE
+      SET mode = EXCLUDED.mode, first_hour = EXCLUDED.first_hour, last_hour = EXCLUDED.last_hour,
+          updated_by = EXCLUDED.updated_by, updated_at = now()`;
+}
+
+export async function clearCoverageRule(client, kind, key) {
+  await db()`DELETE FROM coverage_rules WHERE client = ${client} AND kind = ${kind} AND key = ${key}`;
+}

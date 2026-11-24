@@ -56,6 +56,7 @@ On-call shifts are appointments on a dedicated GHL calendar (`ghl.onCall.calenda
 | `/hotswap help` | anyone | explain commands and buttons |
 | `/hotswap today` / `/hotswap tomorrow` | manager | build or refresh the roster now (edits the existing message) |
 | `/hotswap add @name` / `/hotswap remove @name` | manager | change the pool |
+| `/hotswap dates` | manager | coverage exceptions: turn a date off or set custom hours (holidays), or set a weekly rule for a weekday (weekends). Date rules beat weekly rules, which beat the config. Changes to today/tomorrow apply immediately: on-call appointments outside the new hours are cancelled and new hours are filled. |
 
 ## Day-to-day config (`config/<client>.json`)
 - `pool.include` / `pool.exclude`: permanent additions/removals in code (Slack commands are usually easier).

@@ -73,3 +73,17 @@ CREATE TABLE IF NOT EXISTS cover_messages (
   ts       TEXT     NOT NULL,
   PRIMARY KEY (channel, ts)
 );
+
+-- Coverage exceptions set from Slack (/hotswap dates). A 'date' rule beats a 'weekday' rule,
+-- which beats the config default.
+CREATE TABLE IF NOT EXISTS coverage_rules (
+  client      TEXT        NOT NULL,
+  kind        TEXT        NOT NULL,      -- date | weekday
+  key         TEXT        NOT NULL,      -- YYYY-MM-DD | 0-6 (0 = Sunday)
+  mode        TEXT        NOT NULL,      -- off | hours
+  first_hour  SMALLINT,
+  last_hour   SMALLINT,                  -- last hour that starts coverage (8 PM hour = 20)
+  updated_by  TEXT,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (client, kind, key)
+);

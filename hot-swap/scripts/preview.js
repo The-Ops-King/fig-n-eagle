@@ -10,7 +10,7 @@ const cfg = loadConfig(process.argv[3] || process.env.HOT_SWAP_CLIENT || 'fig-n-
 const day = process.argv[2] || dateKey(Date.now(), cfg.timezone);
 const ghl = ghlClient(cfg);
 const people = await poolFromGhl(cfg, ghl);
-const hours = hoursToCover(cfg, day, hourStart(day, 0, cfg.timezone));
+const hours = await hoursToCover(cfg, day, hourStart(day, 0, cfg.timezone), []);
 const avail = await availability(cfg, ghl, people, day, hours);
 const { assignments, gaps } = planRoster({ hours, people: avail, headcount: (h) => headcountFor(cfg, h), maxConsecutive: cfg.coverage.maxConsecutiveHours });
 const name = new Map(avail.map((p) => [p.id, p.name]));

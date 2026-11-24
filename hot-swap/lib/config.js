@@ -42,3 +42,17 @@ export function coverageHours(cfg) {
   for (let h = cfg.coverage.firstHour; h <= cfg.coverage.lastHour; h++) out.push(h);
   return out;
 }
+
+// Hours to cover on `day` (YYYY-MM-DD), applying rules: date rule > weekday rule > config.
+// Returns { hours, source } where source is 'date' | 'weekday' | 'default'.
+export function dayCoverage(cfg, day, rules = [], weekday) {
+  const find = (kind, key) => rules.find((r) => r.kind === kind && String(r.key) === String(key));
+  const rule = find('date', day) || find('weekday', weekday);
+  if (rule) {
+    if (rule.mode === 'off') return { hours: [], source: rule.kind, rule };
+    const out = [];
+    for (let h = rule.first_hour; h <= rule.last_hour; h++) out.push(h);
+    return { hours: out, source: rule.kind, rule };
+  }
+  return { hours: cfg.coverage.days.includes(weekday) ? coverageHours(cfg) : [], source: 'default' };
+}
