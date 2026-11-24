@@ -1,9 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    { "path": "/api/cron/tick", "schedule": "0 * * * *" }
+    {
+      "path": "/api/cron/tick",
+      "schedule": "0 * * * *"
+    }
   ],
   "functions": {
-    "api/**/*.js": { "maxDuration": 60 }
+    "api/**/*.js": {
+      "maxDuration": 60
+    },
+    "api/slack/interactions.js": {
+      "maxDuration": 300
+    }
   }
 }

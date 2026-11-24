@@ -194,7 +194,8 @@ export async function trackedMessages(client) {
     SELECT channel, ts FROM roster_posts WHERE client = ${client}
     UNION SELECT channel, ts FROM cover_messages WHERE client = ${client}
     UNION SELECT channel, ts FROM gap_boards WHERE client = ${client}
-    UNION SELECT channel, ts FROM swap_requests WHERE client = ${client} AND ts IS NOT NULL`;
+    UNION SELECT channel, ts FROM swap_requests WHERE client = ${client} AND ts IS NOT NULL
+    UNION SELECT channel, escalation_ts FROM swap_requests WHERE client = ${client} AND escalation_ts IS NOT NULL`;
 }
 
 export async function slotEventIds(client) {
@@ -210,4 +211,8 @@ export async function wipeActivity(client) {
   await db()`DELETE FROM cover_messages WHERE client = ${client}`;
   await db()`DELETE FROM gap_boards WHERE client = ${client}`;
   await db()`DELETE FROM manager_alerts WHERE client = ${client}`;
+}
+
+export async function setEscalationTs(id, ts) {
+  await db()`UPDATE swap_requests SET escalation_ts = ${ts} WHERE id = ${id}`;
 }

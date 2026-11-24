@@ -755,42 +755,35 @@ export async function createSwapRequest(cfg, { ghl, slack, team, appointmentId, 
   const msg = requestBlocks(cfg, team, req, { onCall: onCallText, headline: '🔥 *Hot swap needed*' });
   const posted = await slack.post(cfg.slack.channelId, msg.text, msg.blocks);
 
-  let escalationId = null;
+  await store.setRequestMessage(req.id, posted.channel, posted.ts, null);
   if (!urgent) {
-    const esc = requestBlocks(cfg, team, req, {
-      headline: `⏰ *Unclaimed after ${cfg.claim?.escalateAfterMinutes ?? 3} min.* Anyone free?`,
-      onCall: allMentions,
-    });
-    esc.text = `${escalationMarker(req.id)} still unclaimed: ${esc.text}`;
-    const sched = await slack.schedule(cfg.slack.channelId, Math.floor((Date.now() + escalateMs) / 1000), esc.text, esc.blocks,
-      { thread_ts: posted.ts, reply_broadcast: true });
-    escalationId = sched.scheduled_message_id;
-  }
-  await store.setRequestMessage(req.id, posted.channel, posted.ts, escalationId);
-  // Claimed while we were scheduling? Cancel the alert ourselves.
-  if (escalationId && (await store.getRequest(req.id))?.status !== 'open') {
-    await slack.unschedule(cfg.slack.channelId, escalationId).catch(() => {});
+    // Wait, then decide: alert only if it's still unclaimed right now. Nothing is pre-scheduled,
+    // so a claim can never be followed by an "unclaimed" alert.
+    const notify = async () => {
+      await new Promise((r) => setTimeout(r, escalateMs));
+      const latest = await store.getRequest(req.id);
+      if (latest?.status !== 'open') return;
+      const esc = requestBlocks(cfg, team, latest, {
+        headline: `⏰ *Unclaimed after ${cfg.claim?.escalateAfterMinutes ?? 3} min.* Anyone free?`,
+        onCall: allMentions,
+      });
+      const sent = await slack.post(posted.channel, esc.text, esc.blocks, { thread_ts: posted.ts, reply_broadcast: true });
+      await store.setEscalationTs(req.id, sent.ts);
+      // Claimed in the instant between the check and the post: remove it again.
+      if ((await store.getRequest(req.id))?.status !== 'open') await slack.remove(posted.channel, sent.ts).catch(() => {});
+    };
+    return { ok: true, message: 'Posted. Stay on your current call. Someone will claim it.', after: notify };
   }
   return { ok: true, message: 'Posted. Stay on your current call. Someone will claim it.' };
 }
 
-const escalationMarker = (id) => `Hot swap #${id}`;
-
-// Cancel the pending "unclaimed" alert. Uses the saved ID, and also scans the channel's scheduled
-// messages for this request's marker, so it works even if the claim lands before the ID was saved.
+// Remove the "unclaimed" alert if it already went out (it's noise once someone has the call).
+// Also cancels alerts pre-scheduled by older versions of the app.
 async function cancelEscalation(cfg, slack, req) {
   const channel = req.channel || cfg.slack.channelId;
   const fresh = await store.getRequest(req.id);
-  const ids = new Set([req.escalation_msg_id, fresh?.escalation_msg_id].filter(Boolean));
-  try {
-    const marker = `${escalationMarker(req.id)} still unclaimed`;
-    for (const m of await slack.scheduledIn(cfg.slack.channelId)) if ((m.text || '').startsWith(marker)) ids.add(m.id);
-  } catch (e) { console.error('list scheduled failed', e.message); }
-  for (const id of ids) {
-    await slack.unschedule(channel, id).catch((e) => {
-      if (!['invalid_scheduled_message_id'].includes(e.slackError)) console.error('unschedule failed', e.slackError || e.message);
-    });
-  }
+  if (fresh?.escalation_ts) await slack.remove(channel, fresh.escalation_ts).catch(() => {});
+  if (fresh?.escalation_msg_id) await slack.unschedule(channel, fresh.escalation_msg_id).catch(() => {});
 }
 
 export async function claimSwap(cfg, { ghl, slack, team, requestId, slackUserId }) {

@@ -105,3 +105,6 @@ CREATE TABLE IF NOT EXISTS manager_alerts (
   sent_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (client, day, hour)
 );
+
+-- Posted "unclaimed" alert (so a later claim can delete it).
+ALTER TABLE swap_requests ADD COLUMN IF NOT EXISTS escalation_ts TEXT;

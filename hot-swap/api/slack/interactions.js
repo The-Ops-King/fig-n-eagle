@@ -38,8 +38,13 @@ export async function POST(request) {
       .catch((e) => { console.error(e); return slack.updateView(view.id, messageView(title, `Something went wrong: ${e.message}`)); }));
     return empty();
   };
+  // Runs after Slack has its answer. A result may carry `after`: follow-up work (e.g. the
+  // 3-minute unclaimed check) that keeps running in the same invocation.
   const background = (fn) => {
-    waitUntil(context(base).then(fn).then((r) => r?.message && say(r.message)).catch(fail));
+    waitUntil(context(base).then(fn).then(async (r) => {
+      if (r?.message) await say(r.message);
+      if (r?.after) await r.after();
+    }).catch(fail));
   };
 
   if (payload.type === 'shortcut' && payload.callback_id === 'hot_swap_request') {
