@@ -53,6 +53,7 @@ On-call shifts are appointments on a dedicated GHL calendar (`ghl.onCall.calenda
 |---|---|---|
 | `/hotswap` | anyone | request a hot swap for one of your upcoming calls |
 | `/hotswap pool` | anyone | list the pool |
+| `/hotswap help` | anyone | explain commands and buttons |
 | `/hotswap today` / `/hotswap tomorrow` | manager | build or refresh the roster now (edits the existing message) |
 | `/hotswap add @name` / `/hotswap remove @name` | manager | change the pool |
 

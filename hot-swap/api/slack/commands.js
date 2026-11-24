@@ -4,6 +4,7 @@
 //   /hotswap tomorrow   build/refresh TOMORROW's plan now (manager only; alias: plan)
 //   /hotswap add @name | remove @name   change the pool (manager only)
 //   /hotswap pool       list who's in the pool
+//   /hotswap help       explain commands and buttons
 // Request URL: https://<deployment>/api/slack/commands
 import { waitUntil } from '@vercel/functions';
 import { verifySlackSignature } from '../../lib/slack.js';
@@ -11,6 +12,26 @@ import { baseContext, context, resetTeamCache } from '../../lib/context.js';
 import { dateKey, nextDateKey, formatDay } from '../../lib/time.js';
 import * as svc from '../../lib/service.js';
 import { loadingView, messageView, requestView } from '../../lib/views.js';
+
+const HELP = [
+  '*Hot Swap: who takes a closer\'s call when they can\'t.*',
+  '',
+  '*Everyone*',
+  '• `/hotswap`: hand off one of your upcoming calls. Whoever is on call that hour gets tagged; first to click *I\'ve got it* takes it and the appointment is reassigned to them in GHL. Unclaimed after 3 min, it goes to everyone.',
+  '• `/hotswap pool`: see who\'s in the hot-swap pool.',
+  '• `/hotswap help`: this message.',
+  '',
+  '*Roster buttons*',
+  '• *Request a hot swap*: same as `/hotswap`.',
+  '• *Can\'t make my hour*: frees one of your on-call hours. It shows NOT COVERED and the free people get an *I\'ll cover* button.',
+  '• *Cover an hour*: take an hour that still needs someone (including the one happening now).',
+  '',
+  '*Manager*',
+  '• `/hotswap today` / `/hotswap tomorrow`: build or refresh the roster now (fills open hours, keeps existing assignments).',
+  '• `/hotswap add @name` / `/hotswap remove @name`: add someone to the pool (e.g. a setter) or take them out (frees their hours).',
+  '',
+  '_Schedule: tomorrow\'s plan posts at 6 PM ET, today\'s roster at 7 AM ET. On-call hours appear on your GHL and Google calendar as "(Name) Hot Swap On-Call"._',
+].join('\n');
 
 const ephemeral = (text) => new Response(JSON.stringify({ response_type: 'ephemeral', text }), {
   status: 200, headers: { 'Content-Type': 'application/json' },
@@ -74,7 +95,8 @@ export async function POST(request) {
   }
 
   if (sub && sub !== 'request') {
-    return ephemeral('Usage: `/hotswap` request a hot swap · `/hotswap pool` see who is in the pool. Managers: `/hotswap today`, `/hotswap tomorrow`, `/hotswap add @name`, `/hotswap remove @name`.');
+    const unknown = sub === 'help' ? '' : `I don't know \`/hotswap ${raw}\`. `;
+    return ephemeral(unknown + HELP);
   }
 
   const title = 'Request a hot swap';
