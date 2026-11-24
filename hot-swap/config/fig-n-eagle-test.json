@@ -1,0 +1,35 @@
+{
+  "client": "fig-n-eagle-test",
+  "displayName": "Fig & Eagle (TEST)",
+  "timezone": "America/New_York",
+
+  "ghl": {
+    "locationId": "TFjAchoN7yuxbz4BUdqd",
+    "tokenEnv": "GHL_PIT_FIG_N_EAGLE",
+    "transferCalendarIds": ["5m2NwdvyFM26w0ITtZYI", "jBChHJVd25NLx7SAsVop"]
+  },
+
+  "slack": {
+    "channelId": "SET_TEST_CHANNEL_ID",
+    "manager": { "name": "J Tyler Ray", "email": "jtyler@catalyst.surf", "slackUserId": "U0CCS9JKRCK" }
+  },
+
+  "coverage": {
+    "days": [0, 1, 2, 3, 4, 5, 6],
+    "firstHour": 8,
+    "lastHour": 20,
+    "headcount": { "default": 1 },
+    "maxConsecutiveHours": 3
+  },
+
+  "schedule": { "planHour": 18, "confirmHour": 7 },
+
+  "claim": { "escalateAfterMinutes": 3 },
+
+  "blockTitle": "Hot Swap On-Call (TEST)",
+
+  "pool": [
+    { "name": "J Tyler Ray", "ghlUserId": "0P99eWr8BKMRUjWmYYlZ", "email": "jtyler@catalyst.surf", "role": "closer", "availabilityCalendarId": "SET_JT_TEST_CALENDAR_ID", "active": true, "slackUserId": "U0CCS9JKRCK" },
+    { "name": "SET_HELPER_NAME", "ghlUserId": "SET_HELPER_GHL_USER_ID", "email": "", "role": "closer", "availabilityCalendarId": "SET_HELPER_TEST_CALENDAR_ID", "active": true, "slackUserId": "SET_HELPER_SLACK_ID" }
+  ]
+}
