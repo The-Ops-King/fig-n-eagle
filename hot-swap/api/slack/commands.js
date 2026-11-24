@@ -18,7 +18,7 @@ const HELP = [
   '*Hot Swap: who takes a closer\'s call when they can\'t.*',
   '',
   '*Everyone*',
-  '• `/hotswap`: hand off one of your upcoming calls. Whoever is on call that hour gets tagged; first to click *I\'ve got it* takes it and the appointment is reassigned to them in GHL. Unclaimed after 3 min, it goes to everyone.',
+  '• `/hotswap`: hand off one of your upcoming calls. Whoever is on call that hour gets tagged; first to click *I\'ve got it* takes it, and the deal + contact owner move to them in GHL (with a note). Unclaimed after 3 min, it goes to everyone.',
   '• `/hotswap pool`: see who\'s in the hot-swap pool.',
   '• `/hotswap help`: this message.',
   '',

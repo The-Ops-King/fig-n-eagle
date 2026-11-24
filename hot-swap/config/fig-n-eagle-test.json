@@ -12,7 +12,10 @@
     "onCall": {
       "calendarId": "phwWiiMh7igXecwDUcr4",
       "contactId": "PUYtvOWwLOfPWTLw7JHj"
-    }
+    },
+    "dealPipelineIds": [
+      "rR928QgqANV8RmZHjjOS"
+    ]
   },
   "slack": {
     "channelId": "C0CLNCGLUDA",

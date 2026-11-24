@@ -10,7 +10,7 @@ Makes sure someone is always lined up to take a closer's call when the closer ca
 | **7 AM ET, morning of** | Re-checks today. Keeps everyone already assigned, fills any gaps with people who became free overnight, posts "Today's hot-swap roster", and DMs the manager what's still open. |
 | **"Can't make my hour"** | Removes their on-call appointment, marks the hour **NOT COVERED** on the roster, and posts an **"I'll cover"** button in the thread tagging whoever is free (or the manager if nobody is). Whoever clicks gets the hour. |
 | **"Cover an hour"** | Anyone in the pool can take an hour that still needs people (up to its headcount), if their calendar is free. The hour already under way can be taken any time unless they have a call during the rest of it; its on-call appointment starts now. |
-| **Hot swap request** (`/hotswap`, the global shortcut, or the roster button) | Closer picks one of their next calls. The bot tags whoever is on call that hour. **First to click "I've got it" wins**: the GHL appointment is reassigned to them (they get the credit). No claim after 3 min: it escalates to the whole pool plus the manager. Calls starting within 3 min, or hours with nobody on call, go to everyone immediately. |
+| **Hot swap request** (`/hotswap`, the global shortcut, or the roster button) | Closer picks one of their next calls. The bot tags whoever is on call that hour. **First to click "I've got it" wins**: the deal owner and contact owner move to them (they get the credit) and a note is added to the contact. The appointment stays on its calendar under the original closer, because GHL only lets calendar team members own appointments. No claim after 3 min: it escalates to the whole pool plus the manager. Calls starting within 3 min, or hours with nobody on call, go to everyone immediately. |
 
 Every request is logged in `swap_requests` (requested, claimed, by whom, how fast, reassignment errors), which gives you the SLA data.
 
@@ -32,7 +32,7 @@ slack-manifest.yaml        Slack app definition
 ## Setup (one time)
 1. **Vercel project**: import this repo, set **Root Directory = `hot-swap`**.
 2. **Database**: Vercel → Storage → add **Neon Postgres** to the project (sets `DATABASE_URL`). Tables are created automatically on first use.
-3. **GHL token**: in the sub-account, Settings → Private Integrations → new token with `calendars.readonly`, `calendars.write`, `calendars/events.readonly`, `calendars/events.write`, `contacts.readonly`, `users.readonly`. Use a dedicated token for this app.
+3. **GHL token**: in the sub-account, Settings → Private Integrations → new token with `calendars.readonly`, `calendars.write`, `calendars/events.readonly`, `calendars/events.write`, `contacts.readonly`, `contacts.write`, `opportunities.readonly`, `opportunities.write`, `users.readonly`. Use a dedicated token for this app.
 4. **Slack app**: api.slack.com/apps → Create New App → From manifest → paste `slack-manifest.yaml` with your Vercel domain in place of `YOUR-DEPLOYMENT`. Install to the workspace. Invite the bot to the hot-transfer channel (`/invite @Hot Swap`).
 5. **Env vars** (Vercel → Settings → Environment Variables), see `.env.example`:
    `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `CRON_SECRET`, `GHL_PIT_FIG_N_EAGLE`, `HOT_SWAP_CLIENT=fig-n-eagle`.

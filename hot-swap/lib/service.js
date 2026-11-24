@@ -620,19 +620,42 @@ export async function claimSwap(cfg, { ghl, slack, team, requestId, slackUserId 
 
   if (req.escalation_msg_id) await slack.unschedule(req.channel, req.escalation_msg_id).catch(() => {});
 
-  let reassignNote = 'The appointment is now assigned to you in GHL.';
-  try {
-    await ghl.reassignAppointment(req.appointment_id, me.ghlUserId);
-  } catch (e) {
-    await store.setReassignError(req.id, e.message);
-    reassignNote = `⚠️ GHL reassignment failed (${e.message.slice(0, 120)}). Reassign it manually so you get credit.`;
-  }
+  // Credit moves via the deal owner + contact owner. The appointment itself is left alone:
+  // GHL only allows calendar team members as appointment owners, and A/B teams stay as they are.
+  const { done: did, problems } = await creditClaimer(cfg, ghl, team, req, me);
+  if (problems.length) await store.setReassignError(req.id, problems.join(' | '));
+  const status = [
+    did.length ? `Moved to you in GHL: ${did.join(', ')}.` : '',
+    problems.length ? `⚠️ Not updated: ${problems.join('; ')}. Fix it in GHL so you get credit.` : '',
+  ].filter(Boolean).join(' ');
 
-  const done = requestBlocks(cfg, team, { ...req, ...won }, {
+  const msg = requestBlocks(cfg, team, { ...req, ...won }, {
     headline: `✅ *Claimed by ${mention(slackUserId, me.name)}*`,
-    onCall: `${reassignNote} Next: text the prospect your Zoom link from GHL.`,
+    onCall: `${status} Next: text the prospect your Zoom link from GHL.`,
     done: true,
   });
-  await slack.update(req.channel, req.ts, done.text, done.blocks);
-  return { ok: true, message: reassignNote };
+  await slack.update(req.channel, req.ts, msg.text, msg.blocks);
+  return { ok: true, message: status || 'Claimed.' };
+}
+
+async function creditClaimer(cfg, ghl, team, req, me) {
+  const done = [];
+  const problems = [];
+  if (!req.contact_id) return { done, problems: ['no contact on the appointment'] };
+  const from = team.byId.get(req.from_ghl_user_id)?.name || 'the original closer';
+  try {
+    const [deal] = await ghl.openOpportunities(req.contact_id, cfg.ghl.dealPipelineIds || []);
+    if (deal) { await ghl.setOpportunityOwner(deal.id, me.ghlUserId); done.push('deal owner'); }
+    else problems.push('no open deal found');
+  } catch (e) { problems.push(`deal owner (${e.message.slice(0, 80)})`); }
+  try { await ghl.setContactOwner(req.contact_id, me.ghlUserId); done.push('contact owner'); }
+  catch (e) { problems.push(`contact owner (${e.message.slice(0, 80)})`); }
+  try {
+    const when = `${formatTime(Date.parse(req.appt_start), cfg.timezone)} ET on ${formatDay(dateKey(Date.parse(req.appt_start), cfg.timezone))}`;
+    await ghl.addNote(req.contact_id,
+      `Hot swap: ${from} couldn't take the ${when} call${req.reason ? ` (${req.reason})` : ''}. ${me.name} took it. ` +
+      `Deal and contact owner moved to ${me.name}. The calendar appointment stays under ${from}.`, me.ghlUserId);
+    done.push('note added');
+  } catch (e) { problems.push(`note (${e.message.slice(0, 80)})`); }
+  return { done, problems };
 }

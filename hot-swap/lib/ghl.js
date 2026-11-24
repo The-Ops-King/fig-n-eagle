@@ -151,14 +151,27 @@ export function ghlClient(cfg, { fetchImpl = fetch, token = process.env[cfg.ghl.
       }
     },
 
-    // Hand the appointment to a new owner. The receiver's own on-call block covers this
-    // hour, so free-slot validation must be skipped.
-    async reassignAppointment(eventId, userId) {
-      return call(`/calendars/events/appointments/${eventId}`, {
-        method: 'PUT',
-        body: { assignedUserId: userId, ignoreFreeSlotValidation: true },
-      });
+    // Open deals for a contact, newest first, optionally limited to some pipelines.
+    async openOpportunities(contactId, pipelineIds = []) {
+      const q = new URLSearchParams({ location_id: locationId, contact_id: contactId, status: 'open', limit: '20' });
+      const { opportunities = [] } = await call(`/opportunities/search?${q}`, { version: CONTACT_VERSION });
+      return opportunities
+        .filter((o) => !pipelineIds.length || pipelineIds.includes(o.pipelineId))
+        .sort((a, b) => Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0));
     },
+
+    async setOpportunityOwner(opportunityId, userId) {
+      return call(`/opportunities/${opportunityId}`, { method: 'PUT', version: CONTACT_VERSION, body: { assignedTo: userId } });
+    },
+
+    async setContactOwner(contactId, userId) {
+      return call(`/contacts/${contactId}`, { method: 'PUT', version: CONTACT_VERSION, body: { assignedTo: userId } });
+    },
+
+    async addNote(contactId, body, userId) {
+      return call(`/contacts/${contactId}/notes`, { method: 'POST', version: CONTACT_VERSION, body: { body, ...(userId ? { userId } : {}) } });
+    },
+
 
     async contactName(contactId) {
       const { contact } = await call(`/contacts/${contactId}`, { version: CONTACT_VERSION });
