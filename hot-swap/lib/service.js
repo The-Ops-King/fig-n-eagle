@@ -1,7 +1,7 @@
 // Orchestration: GHL + Slack + DB. Each exported function is one user-visible action.
 import { activePool, coverageHours, headcountFor } from './config.js';
 import { slotsToIntervals, freeHours } from './availability.js';
-import { planRoster, pickReplacement } from './roster.js';
+import { planRoster } from './roster.js';
 import { HOUR, dateKey, nextDateKey, hourStart, hourLabel, formatDay, formatTime, weekdayOf } from './time.js';
 import { mention } from './slack.js';
 import * as store from './db.js';
@@ -130,7 +130,7 @@ export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = 
     const want = headcountFor(cfg, h);
     const who = ids.map((id) => mention(name(id)?.slackUserId, name(id)?.name || id)).join(', ');
     if (hourStart(day, h, cfg.timezone) + HOUR <= now) return `~${hourLabel(h)}: ${ids.map((id) => name(id)?.name || id).join(', ') || '-'}~`;
-    if (!ids.length) return `⚠️ *${hourLabel(h)}*: nobody free. ${mention(team.manager.slackUserId, team.manager.name)} needs to find cover`;
+    if (!ids.length) return `⚠️ *${hourLabel(h)}*: *NOT COVERED*. Tap *Cover an open hour* to take it.`;
     if (ids.length < want) return `*${hourLabel(h)}*: ${who}  ⚠️ short ${want - ids.length}`;
     return `*${hourLabel(h)}*: ${who}`;
   });
@@ -155,12 +155,19 @@ export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = 
 // build/extend the roster, block hours in GHL, post a fresh roster message, DM the manager gaps.
 // Re-running keeps existing assignments and only fills holes, so the morning run picks up
 // anyone who became free overnight.
-export async function publishRoster(cfg, { ghl, slack, team, day, phase }) {
+// fresh=true (scheduled runs): always post a new message. fresh=false (manual re-run):
+// edit today's existing message in place if there is one.
+export async function publishRoster(cfg, { ghl, slack, team, day, phase, fresh = true }) {
   const result = await buildRoster(cfg, { ghl, team, day, apply: true });
   const byHour = await currentRoster(cfg, day);
   const msg = renderRoster(cfg, team, day, byHour, { phase });
-  const { ts } = await slack.post(cfg.slack.channelId, msg.text, msg.blocks);
-  await store.saveRosterPost(cfg.client, day, cfg.slack.channelId, ts);
+  const prev = fresh ? null : await store.getRosterPost(cfg.client, day);
+  if (prev) {
+    await slack.update(prev.channel, prev.ts, msg.text, msg.blocks);
+  } else {
+    const { ts } = await slack.post(cfg.slack.channelId, msg.text, msg.blocks);
+    await store.saveRosterPost(cfg.client, day, cfg.slack.channelId, ts);
+  }
 
   if (team.manager.slackUserId && result.hours.length) {
     const label = phase === 'plan' ? `Tomorrow's hot-swap plan (${formatDay(day)})` : `Today's hot-swap roster (${formatDay(day)})`;
@@ -183,13 +190,14 @@ async function refreshRosterMessage(cfg, { slack, team, day }) {
   await slack.update(post.channel, post.ts, msg.text, msg.blocks);
 }
 
-async function rosterThread(cfg, slack, day, text) {
+async function rosterThread(cfg, slack, day, text, blocks) {
   const post = await store.getRosterPost(cfg.client, day);
-  if (post) await slack.post(post.channel, text, undefined, { thread_ts: post.ts });
-  else await slack.post(cfg.slack.channelId, text);
+  if (post) return slack.post(post.channel, text, blocks, { thread_ts: post.ts, reply_broadcast: !!blocks });
+  return slack.post(cfg.slack.channelId, text, blocks);
 }
 
-// Person can't make one of their hours: free it, find a replacement, update the roster.
+// Person can't make one of their hours: free it, mark the hour NOT COVERED, and post a
+// "cover it" button in the roster thread tagging whoever is free. First click takes it.
 export async function releaseHour(cfg, { ghl, slack, team, day, slotId, slackUserId }) {
   const slots = await store.activeSlots(cfg.client, day);
   const slot = slots.find((s) => String(s.id) === String(slotId));
@@ -200,34 +208,45 @@ export async function releaseHour(cfg, { ghl, slack, team, day, slotId, slackUse
 
   if (slot.block_event_id) await ghl.deleteEvent(slot.block_event_id).catch((e) => console.error('unblock failed', e.message));
   await store.releaseSlot(slot.id);
-
-  const others = slots.filter((s) => s.hour === slot.hour && s.id !== slot.id).map((s) => s.ghl_user_id);
-  const candidates = team.people.filter((p) => p.id !== slot.ghl_user_id && !others.includes(p.id));
-  const avail = await availability(cfg, ghl, candidates, day, [slot.hour]);
-  const pick = pickReplacement({ hour: slot.hour, people: avail });
-
-  let note;
-  if (pick) {
-    await assignHour(cfg, ghl, { day, hour: slot.hour, ghlUserId: pick.id, source: 'replacement' });
-    note = `${mention(me?.slackUserId, me?.name)} can't make *${hourLabel(slot.hour)}*. ${mention(pick.slackUserId, pick.name)} is now on call for that hour (it's blocked on your GHL calendar).`;
-  } else {
-    note = `${mention(me?.slackUserId, me?.name)} can't make *${hourLabel(slot.hour)}* and nobody else is free. ${mention(team.manager.slackUserId, team.manager.name)}, this hour needs cover.`;
-  }
   await refreshRosterMessage(cfg, { slack, team, day });
-  await rosterThread(cfg, slack, day, note);
-  return { ok: true, message: pick ? `Released. ${pick.name} is covering ${hourLabel(slot.hour)}.` : 'Released. No replacement was free, so David has been tagged.' };
+
+  const stillCovered = slots.filter((s) => s.hour === slot.hour && s.id !== slot.id).map((s) => s.ghl_user_id);
+  const candidates = team.people.filter((p) => p.id !== slot.ghl_user_id && !stillCovered.includes(p.id));
+  const free = (await availability(cfg, ghl, candidates, day, [slot.hour])).filter((p) => p.free.has(slot.hour));
+
+  const who = free.length
+    ? `Free then: ${free.map((p) => mention(p.slackUserId, p.name)).join(' ')}`
+    : `Nobody is free then. ${mention(team.manager.slackUserId, team.manager.name)}, this hour needs cover.`;
+  const msg = coverRequestMessage(day, slot.hour, `${mention(me?.slackUserId, me?.name)} can't make *${hourLabel(slot.hour)}*. It's *NOT COVERED*.\n${who}`);
+  await rosterThread(cfg, slack, day, msg.text, msg.blocks);
+  return { ok: true, message: `Released ${hourLabel(slot.hour)}. It's marked not covered and the free people were tagged.` };
+}
+
+function coverRequestMessage(day, hour, text) {
+  return {
+    text,
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text } },
+      { type: 'actions', elements: [
+        { type: 'button', text: { type: 'plain_text', text: `I'll cover ${hourLabel(hour)}` }, style: 'primary', action_id: 'cover_hour', value: `${day}|${hour}` },
+      ] },
+    ],
+  };
 }
 
 // Someone volunteers for an open hour.
-export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUserId }) {
+export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUserId, coverMessage }) {
   const me = await personForSlackUser(team, slack, slackUserId);
   if (!me) return { ok: false, message: "You're not in the hot-swap pool. Ask your manager to add you." };
+  if (!(await openHoursFor(cfg, day)).includes(hour)) return { ok: false, message: `${hourLabel(hour)} is already covered. Thanks though!` };
   const [a] = await availability(cfg, ghl, [me], day, [hour]);
   if (!a.free.has(hour)) return { ok: false, message: `Your GHL calendar isn't free for all of ${hourLabel(hour)}.` };
   const row = await assignHour(cfg, ghl, { day, hour, ghlUserId: me.id, source: 'volunteer' });
   if (!row) return { ok: false, message: `You're already on call at ${hourLabel(hour)}.` };
   await refreshRosterMessage(cfg, { slack, team, day });
-  await rosterThread(cfg, slack, day, `${mention(me.slackUserId, me.name)} picked up *${hourLabel(hour)}*. 🙌`);
+  const done = `✅ *${hourLabel(hour)}* is covered by ${mention(me.slackUserId, me.name)}.`;
+  if (coverMessage) await slack.update(coverMessage.channel, coverMessage.ts, done, [{ type: 'section', text: { type: 'mrkdwn', text: done } }]);
+  else await rosterThread(cfg, slack, day, done);
   return { ok: true, message: `You're on call at ${hourLabel(hour)}. It's blocked on your GHL calendar.` };
 }
 

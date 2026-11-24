@@ -44,10 +44,10 @@ export async function POST(request) {
       if (ctx.team.manager.slackUserId !== user) {
         return followUp(responseUrl, `Only ${ctx.team.manager.name} can run \`/hotswap ${sub}\`.`);
       }
-      const r = await svc.publishRoster(base.cfg, { ...ctx, day, phase });
+      const r = await svc.publishRoster(base.cfg, { ...ctx, day, phase, fresh: false });
       const gaps = r.gaps.length ? `${r.gaps.length} hour(s) still need cover.` : 'Every hour is covered.';
       const errs = r.errors.length ? `\nProblems: ${r.errors.join('; ')}` : '';
-      return followUp(responseUrl, `Posted the ${phase === 'plan' ? 'plan' : 'roster'} for ${formatDay(day)}. ${gaps}${errs}`);
+      return followUp(responseUrl, `Updated the ${phase === 'plan' ? 'plan' : 'roster'} for ${formatDay(day)}. ${gaps}${errs}`);
     }).catch((e) => { console.error(e); return followUp(responseUrl, `Something went wrong: ${e.message}`); }));
     return ephemeral(`Building the ${sub === 'plan' ? "plan for tomorrow" : "roster for today"}…`);
   }

@@ -59,6 +59,14 @@ export async function POST(request) {
           releaseView(day, await svc.myFutureSlots(cfg, ctx.team, day, user)));
       case 'volunteer_open':
         return openModal('Cover an open hour', async () => volunteerView(day, await svc.openHoursFor(cfg, day)));
+      case 'cover_hour': {
+        const [coverDay, coverHour] = String(action.value).split('|');
+        background((ctx) => svc.volunteerHour(cfg, {
+          ...ctx, day: coverDay, hour: Number(coverHour), slackUserId: user,
+          coverMessage: { channel: payload.channel?.id, ts: payload.message?.ts },
+        }));
+        return empty();
+      }
       case 'claim':
         background((ctx) => svc.claimSwap(cfg, { ...ctx, requestId: action.value, slackUserId: user }));
         return empty();

@@ -17,7 +17,7 @@ test('plan render: tags people, flags gaps and short hours, tags manager', () =>
   const body = blocks[1].text.text;
   assert.match(text, /^Tomorrow's hot-swap plan/);
   assert.match(body, /\*8 AM\*: <@UKAD>/);
-  assert.match(body, /⚠️ \*9 AM\*: nobody free\. <@UDAVID>/);
+  assert.match(body, /⚠️ \*9 AM\*: \*NOT COVERED\*/);
   assert.match(body, /\*2 PM\*: <@UJAKE>  ⚠️ short 1/);
   assert.equal(blocks[3].elements.length, 3);
 });
