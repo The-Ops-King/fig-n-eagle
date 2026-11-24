@@ -26,7 +26,18 @@ export function covers(intervals, start, end) {
 // Which of the given hour starts can this person cover? They must be free from the top of the
 // hour for `minFreeMinutes` (default: one full 45-minute call). Requiring the full 60 minutes
 // would rule out everyone's last hour, because the final slot of a day only spans one call.
-export function freeHours(intervals, hourStarts, minFreeMinutes = 45) {
+//
+// For an hour already under way, GHL no longer returns its past slots, so check from the next
+// slot boundary (now rounded up to `stepMinutes`) to the end of the hour instead.
+export function freeHours(intervals, hourStarts, minFreeMinutes = 45, { now = 0, stepMinutes = 30 } = {}) {
   const need = Math.min(minFreeMinutes, 60) * 60_000;
-  return hourStarts.filter((h) => covers(intervals, h, h + need));
+  const step = stepMinutes * 60_000;
+  return hourStarts.filter((h) => {
+    const end = h + 60 * 60_000;
+    if (now <= h) return covers(intervals, h, h + need);
+    if (now >= end) return false;
+    const from = Math.ceil(now / step) * step;
+    if (from >= end) return false;
+    return covers(intervals, from, Math.min(from + need, end));
+  });
 }

@@ -29,3 +29,14 @@ test('a gap breaks coverage', () => {
 test('no slots, no free hours', () => {
   assert.deepEqual(freeHours(slotsToIntervals([], 45, 30), [t(9)]), []);
 });
+
+test('hour already under way: checks from the next slot to the end of the hour', () => {
+  // 9:13 now; GHL only returns 9:30 onward
+  const iv = slotsToIntervals([t(9, 30), t(10), t(10, 30)], 45, 30);
+  assert.deepEqual(freeHours(iv, [t(9), t(10)], 45, { now: t(9, 13), stepMinutes: 30 }), [t(9), t(10)]);
+  // busy from 9:30: current hour not coverable
+  const busy = slotsToIntervals([t(10), t(10, 30)], 45, 30);
+  assert.deepEqual(freeHours(busy, [t(9), t(10)], 45, { now: t(9, 13), stepMinutes: 30 }), [t(10)]);
+  // 9:45 now, next boundary 10:00 = end of hour: too late to cover 9 AM
+  assert.deepEqual(freeHours(iv, [t(9)], 45, { now: t(9, 45), stepMinutes: 30 }), []);
+});

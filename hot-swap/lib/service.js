@@ -89,7 +89,8 @@ export async function availability(cfg, ghl, people, day, hours) {
       const cal = await ghl.calendar(p.availabilityCalendarId);
       const slots = await ghl.freeSlots(p.availabilityCalendarId, p.ghlUserId, windowStart, windowEnd, tz);
       const intervals = slotsToIntervals(slots, cal.slotDuration || 60, cal.slotInterval || cal.slotDuration || 60);
-      const free = new Set(freeHours(intervals, [...starts.keys()], cfg.coverage.minFreeMinutes ?? 45).map((ms) => starts.get(ms)));
+      const free = new Set(freeHours(intervals, [...starts.keys()], cfg.coverage.minFreeMinutes ?? 45,
+        { now: Date.now(), stepMinutes: cal.slotInterval || cal.slotDuration || 30 }).map((ms) => starts.get(ms)));
       const load = (await ghl.userEvents(p.ghlUserId, dayStart, dayEnd)).length;
       return { ...p, free, load };
     } catch (e) {
