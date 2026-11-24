@@ -48,7 +48,7 @@ export function slackClient({ token = process.env.SLACK_BOT_TOKEN, fetchImpl = f
       return scheduled_messages;
     },
     remove: (channel, ts) => api('chat.delete', { channel, ts }),
-    ephemeral: (channel, user, text) => api('chat.postEphemeral', { channel, user, text }),
+    ephemeral: (channel, user, text, blocks) => api('chat.postEphemeral', { channel, user, text, ...(blocks ? { blocks } : {}) }),
     dm: async (userId, text, blocks) => {
       const { channel } = await api('conversations.open', { users: userId });
       return api('chat.postMessage', { channel: channel.id, text, blocks });

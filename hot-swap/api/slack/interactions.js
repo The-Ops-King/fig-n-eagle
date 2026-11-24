@@ -28,7 +28,7 @@ export async function POST(request) {
   const { cfg, slack } = base;
   const user = payload.user?.id;
   const today = dateKey(Date.now(), cfg.timezone);
-  const say = (text) => slack.ephemeral(payload.channel?.id || cfg.slack.channelId, user, text);
+  const say = (text, blocks) => slack.ephemeral(payload.channel?.id || cfg.slack.channelId, user, text, blocks);
   const fail = (e) => { console.error(e); return say(`Something went wrong: ${e.message}`).catch(() => {}); };
 
   // Open a "Loading" modal right away, then fill it in.
@@ -42,7 +42,7 @@ export async function POST(request) {
   // 3-minute unclaimed check) that keeps running in the same invocation.
   const background = (fn) => {
     waitUntil(context(base).then(fn).then(async (r) => {
-      if (r?.message) await say(r.message);
+      if (r?.message) await say(r.message, r.blocks);
       if (r?.after) await r.after();
     }).catch(fail));
   };
@@ -68,6 +68,11 @@ export async function POST(request) {
       case 'cover_hour': {
         const [coverDay, coverHour] = String(action.value).split('|');
         background((ctx) => svc.volunteerHour(cfg, { ...ctx, day: coverDay, hour: Number(coverHour), slackUserId: user }));
+        return empty();
+      }
+      case 'cover_force': {
+        const [d, h] = String(action.value).split('|');
+        background((ctx) => svc.volunteerHour(cfg, { ...ctx, day: d, hour: Number(h), slackUserId: user, force: true }));
         return empty();
       }
       case 'assign_claim': {

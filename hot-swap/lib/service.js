@@ -354,9 +354,10 @@ function coverRequestMessage(day, hour, text) {
 }
 
 // Put `person` on call for an hour (volunteer or manager assignment), up to the hour's headcount.
-// A person who opts in knows their own day, so only a real call in that hour blocks it; GHL
-// working hours / Google busy times are only used when the app picks people automatically.
-async function takeHour(cfg, { ghl, slack, team }, { day, hour, person, source }) {
+// A real GHL call in that hour always blocks it (no double-booking a prospect). The person's
+// calendar availability (working hours, linked Google/Catalyst busy time) blocks it too unless
+// `force`: the person chose "Cover it anyway", or the manager assigned it.
+async function takeHour(cfg, { ghl, slack, team }, { day, hour, person, source, force = false }) {
   const hStart = hourStart(day, hour, cfg.timezone);
   const hEnd = hStart + HOUR;
   const now = Date.now();
@@ -374,6 +375,10 @@ async function takeHour(cfg, { ghl, slack, team }, { day, hour, person, source }
   const clash = (await ghl.userEvents(person.ghlUserId, from - HOUR, hEnd))
     .find((e) => Date.parse(e.startTime) < hEnd && Date.parse(e.endTime) > from);
   if (clash) return { ok: false, message: `${who} has a call at ${formatTime(Date.parse(clash.startTime), cfg.timezone)} ET during ${hourLabel(hour)}.` };
+  if (!force && now < hStart) {
+    const [a] = await availability(cfg, ghl, [person], day, [hour]);
+    if (!a.free.has(hour)) return { ok: false, calendarBusy: true, message: `${who}'s calendar shows busy at ${hourLabel(hour)} ET.` };
+  }
 
   const row = await assignHour(cfg, ghl, { day, hour, ghlUserId: person.id, source, team });
   if (!row) return { ok: false, message: `${who} is already on call at ${hourLabel(hour)}.` };
@@ -391,18 +396,31 @@ async function takeHour(cfg, { ghl, slack, team }, { day, hour, person, source }
 }
 
 export async function volunteerHour(cfg, ctx) {
-  const { slack, team, day, hour, slackUserId } = ctx;
+  const { slack, team, day, hour, slackUserId, force = false } = ctx;
   const me = await personForSlackUser(team, slack, slackUserId);
   if (!me) return { ok: false, message: "You're not in the hot-swap pool. Ask your manager to add you." };
-  const r = await takeHour(cfg, ctx, { day, hour, person: me, source: 'volunteer' });
-  return r.ok ? { ok: true, message: `You're on call at ${hourLabel(hour)}. It's on your GHL and Google calendar.` } : r;
+  const r = await takeHour(cfg, ctx, { day, hour, person: me, source: 'volunteer', force });
+  if (r.ok) return { ok: true, message: `You're on call at ${hourLabel(hour)}. It's on your GHL and Google calendar.` };
+  if (r.calendarBusy) {
+    const text = `Your calendar shows you busy at ${hourLabel(hour)} ET. If you can still take transfers then, cover it anyway.`;
+    return {
+      ok: false, message: text,
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text } },
+        { type: 'actions', elements: [
+          { type: 'button', text: { type: 'plain_text', text: `Cover ${hourLabel(hour)} anyway` }, style: 'primary', action_id: 'cover_force', value: `${day}|${hour}` },
+        ] },
+      ],
+    };
+  }
+  return r;
 }
 
 // Manager puts someone on call for an hour and lets them know.
 export async function assignHourTo(cfg, ctx, { day, hour, slackUserId, by }) {
   const person = await personForSlackUser(ctx.team, ctx.slack, slackUserId);
   if (!person) return { ok: false, message: `<@${slackUserId}> isn't in the hot-swap pool. Add them first with \`/hotswap add\`.` };
-  const r = await takeHour(cfg, ctx, { day, hour, person, source: 'assigned' });
+  const r = await takeHour(cfg, ctx, { day, hour, person, source: 'assigned', force: true });
   if (!r.ok) return r;
   await ctx.slack.dm(slackUserId, `<@${by}> put you on hot-swap call for *${hourLabel(hour)} ET* on ${formatDay(day)}. It's on your GHL and Google calendar. If a transfer comes in during that hour, claim it.`).catch(() => {});
   return { ok: true, message: `${person.name} is on call at ${hourLabel(hour)} ET on ${formatDay(day)}. They've been told.` };
