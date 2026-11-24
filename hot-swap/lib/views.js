@@ -79,9 +79,9 @@ export function releaseView(day, slots) {
   };
 }
 
-// hours: [{ hour, count, open }]
+// hours: [{ hour, count, need }] (only hours that still need cover)
 export function volunteerView(day, hours) {
-  if (!hours.length) return messageView('Cover an hour', 'There are no hours left to cover today.');
+  if (!hours.length) return messageView('Cover an hour', 'Every remaining hour is covered. 🎉');
   return {
     type: 'modal',
     callback_id: 'volunteer_submit',
@@ -90,7 +90,7 @@ export function volunteerView(day, hours) {
     submit: plain('Take it'),
     close: plain('Cancel'),
     blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: "The hour goes on your GHL and Google calendar so round robin won't book you, and you'll be tagged for transfers. More than one person can cover an hour." } },
+      { type: 'section', text: { type: 'mrkdwn', text: "The hour goes on your GHL and Google calendar so round robin won't book you, and you'll be tagged for transfers." } },
       {
         type: 'input',
         block_id: 'hour',
@@ -99,7 +99,7 @@ export function volunteerView(day, hours) {
           type: 'static_select',
           action_id: 'value',
           options: hours.map((h) => ({
-            text: plain(`${hourLabel(h.hour)} ET${h.open ? '  ⚠️ needs cover' : `  (${h.count} covering)`}`),
+            text: plain(`${hourLabel(h.hour)} ET  ⚠️ needs ${h.need}`),
             value: String(h.hour),
           })),
         },
