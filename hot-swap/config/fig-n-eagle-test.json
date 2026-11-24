@@ -8,7 +8,11 @@
     "transferCalendarIds": [
       "5m2NwdvyFM26w0ITtZYI",
       "jBChHJVd25NLx7SAsVop"
-    ]
+    ],
+    "onCall": {
+      "calendarId": "phwWiiMh7igXecwDUcr4",
+      "contactId": "PUYtvOWwLOfPWTLw7JHj"
+    }
   },
   "slack": {
     "channelId": "C0CLNCGLUDA",

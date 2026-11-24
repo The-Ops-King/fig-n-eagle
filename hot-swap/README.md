@@ -6,10 +6,10 @@ Makes sure someone is always lined up to take a closer's call when the closer ca
 
 | When | What happens |
 |---|---|
-| **6 PM ET, night before** | Builds tomorrow's roster from GHL availability, **blocks each on-call hour on that person's GHL calendar** (so overnight bookings can't take it), posts "Tomorrow's hot-swap plan", and DMs the manager any gaps so cover can be lined up tonight. |
+| **6 PM ET, night before** | Builds tomorrow's roster from GHL availability and **puts each on-call hour on that person's calendar** as an appointment on the "Hot Swap On-Call" GHL calendar. It syncs to their Google Calendar and makes them busy, so round robin can't book them (including overnight), posts "Tomorrow's hot-swap plan", and DMs the manager any gaps so cover can be lined up tonight. |
 | **7 AM ET, morning of** | Re-checks today. Keeps everyone already assigned, fills any gaps with people who became free overnight, posts "Today's hot-swap roster", and DMs the manager what's still open. |
-| **"Can't make my hour"** | Frees the hour in GHL, picks the next free person, blocks it for them, updates the roster, posts in the thread. If nobody's free, tags the manager. |
-| **"Cover an open hour"** | Anyone in the pool can take an open hour if their GHL calendar is free. |
+| **"Can't make my hour"** | Removes their on-call appointment, marks the hour **NOT COVERED** on the roster, and posts an **"I'll cover"** button in the thread tagging whoever is free (or the manager if nobody is). Whoever clicks gets the hour. |
+| **"Cover an hour"** | Anyone in the pool can add themselves to any remaining hour, even one that's already covered, if their calendar is free. |
 | **Hot swap request** (`/hotswap`, the global shortcut, or the roster button) | Closer picks one of their next calls. The bot tags whoever is on call that hour. **First to click "I've got it" wins**: the GHL appointment is reassigned to them (they get the credit). No claim after 3 min: it escalates to the whole pool plus the manager. Calls starting within 3 min, or hours with nobody on call, go to everyone immediately. |
 
 Every request is logged in `swap_requests` (requested, claimed, by whom, how fast, reassignment errors), which gives you the SLA data.
@@ -38,6 +38,9 @@ slack-manifest.yaml        Slack app definition
    `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `CRON_SECRET`, `GHL_PIT_FIG_N_EAGLE`, `HOT_SWAP_CLIENT=fig-n-eagle`.
 6. **Config**: `config/fig-n-eagle.json` has `slack.channelId` (currently #sd-call-transfer) and Slack IDs for David and Rosaline already set. For anyone else whose GHL email isn't their Slack email, set `slackUserId`.
 7. Deploy. The database tables are created automatically on first use. To run the roster now instead of waiting for the schedule, the manager types `/hotswap roster` (today) or `/hotswap plan` (tomorrow) in Slack.
+
+## The "Hot Swap On-Call" GHL calendar
+On-call shifts are appointments on a dedicated GHL calendar (`ghl.onCall.calendarId`), booked against an internal contact (`ghl.onCall.contactId`, "Hot Swap On-Call"), with notifications off. Open that calendar in GHL to see everyone's shifts. It isn't in any calendar group, so workflows filtered to specific calendars or groups don't fire. **When you add someone to `pool`, also add them as a team member on that calendar**, or GHL will reject their shifts.
 
 ## Day-to-day config (`config/<client>.json`)
 - `pool`: who can be on call. Add setters with `"role": "setter"` and their own GHL calendar as `availabilityCalendarId`. Set `"active": false` to pause someone.

@@ -58,7 +58,7 @@ export async function POST(request) {
         return openModal("Can't make my hour", async (ctx) =>
           releaseView(day, await svc.myFutureSlots(cfg, ctx.team, day, user)));
       case 'volunteer_open':
-        return openModal('Cover an open hour', async () => volunteerView(day, await svc.openHoursFor(cfg, day)));
+        return openModal('Cover an hour', async () => volunteerView(day, await svc.coverableHours(cfg, day)));
       case 'cover_hour': {
         const [coverDay, coverHour] = String(action.value).split('|');
         background((ctx) => svc.volunteerHour(cfg, {

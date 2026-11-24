@@ -109,9 +109,9 @@ export async function buildRoster(cfg, { ghl, team, day, apply, now = Date.now()
 
 async function assignHour(cfg, ghl, { day, hour, ghlUserId, source }) {
   const start = hourStart(day, hour, cfg.timezone);
-  const blockEventId = await ghl.createBlock({ userId: ghlUserId, startMs: start, endMs: start + HOUR, title: cfg.blockTitle });
-  const row = await store.insertSlot({ client: cfg.client, day, hour, ghlUserId, blockEventId, source });
-  if (!row && blockEventId) await ghl.deleteEvent(blockEventId).catch(() => {}); // already assigned: undo duplicate block
+  const eventId = await ghl.createOnCall({ userId: ghlUserId, startMs: start, endMs: start + HOUR, title: cfg.blockTitle });
+  const row = await store.insertSlot({ client: cfg.client, day, hour, ghlUserId, blockEventId: eventId, source });
+  if (!row && eventId) await ghl.deleteEvent(eventId).catch(() => {}); // already assigned: undo the duplicate
   return row;
 }
 
@@ -130,7 +130,7 @@ export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = 
     const want = headcountFor(cfg, h);
     const who = ids.map((id) => mention(name(id)?.slackUserId, name(id)?.name || id)).join(', ');
     if (hourStart(day, h, cfg.timezone) + HOUR <= now) return `~${hourLabel(h)}: ${ids.map((id) => name(id)?.name || id).join(', ') || '-'}~`;
-    if (!ids.length) return `⚠️ *${hourLabel(h)}*: *NOT COVERED*. Tap *Cover an open hour* to take it.`;
+    if (!ids.length) return `⚠️ *${hourLabel(h)}*: *NOT COVERED*. Tap *Cover an hour* to take it.`;
     if (ids.length < want) return `*${hourLabel(h)}*: ${who}  ⚠️ short ${want - ids.length}`;
     return `*${hourLabel(h)}*: ${who}`;
   });
@@ -138,13 +138,13 @@ export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = 
   const blocks = [
     { type: 'header', text: { type: 'plain_text', text } },
     { type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') || '_No coverage hours today._' } },
-    { type: 'context', elements: [{ type: 'mrkdwn', text: 'Times are ET. Your on-call hours are blocked on your GHL calendar so round robin won\'t book you. If a transfer comes in during your hour, claim it.' }] },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: 'Times are ET. Your on-call hours are on your GHL and Google calendar, so round robin won\'t book you then. If a transfer comes in during your hour, claim it.' }] },
     {
       type: 'actions',
       elements: [
         { type: 'button', text: { type: 'plain_text', text: 'Request a hot swap' }, style: 'primary', action_id: 'request_open', value: day },
         { type: 'button', text: { type: 'plain_text', text: "Can't make my hour" }, action_id: 'release_open', value: day },
-        { type: 'button', text: { type: 'plain_text', text: 'Cover an open hour' }, action_id: 'volunteer_open', value: day },
+        { type: 'button', text: { type: 'plain_text', text: 'Cover an hour' }, action_id: 'volunteer_open', value: day },
       ],
     },
   ];
@@ -173,7 +173,7 @@ export async function publishRoster(cfg, { ghl, slack, team, day, phase, fresh =
     const label = phase === 'plan' ? `Tomorrow's hot-swap plan (${formatDay(day)})` : `Today's hot-swap roster (${formatDay(day)})`;
     const gapLines = result.gaps.map((g) => `• ${hourLabel(g.hour)} ET: need ${g.missing} more`);
     const parts = [result.gaps.length
-      ? `${label}: *${result.gaps.length} hour(s) without enough cover.*\n${gapLines.join('\n')}\nAnyone in the pool can take an open hour with *Cover an open hour* on the roster.`
+      ? `${label}: *${result.gaps.length} hour(s) without enough cover.*\n${gapLines.join('\n')}\nAnyone in the pool can take an open hour with *Cover an hour* on the roster.`
       : `${label}: every hour is covered. ✅`];
     if (result.errors.length) parts.push(`Problems:\n• ${result.errors.join('\n• ')}`);
     await slack.dm(team.manager.slackUserId, parts.join('\n\n'));
@@ -234,25 +234,36 @@ function coverRequestMessage(day, hour, text) {
   };
 }
 
-// Someone volunteers for an open hour.
+// Someone takes an hour. More than one person can cover the same hour.
 export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUserId, coverMessage }) {
   const me = await personForSlackUser(team, slack, slackUserId);
   if (!me) return { ok: false, message: "You're not in the hot-swap pool. Ask your manager to add you." };
-  if (!(await openHoursFor(cfg, day)).includes(hour)) return { ok: false, message: `${hourLabel(hour)} is already covered. Thanks though!` };
+  if (hourStart(day, hour, cfg.timezone) + HOUR <= Date.now()) return { ok: false, message: `${hourLabel(hour)} is already over.` };
   const [a] = await availability(cfg, ghl, [me], day, [hour]);
   if (!a.free.has(hour)) return { ok: false, message: `Your GHL calendar isn't free for all of ${hourLabel(hour)}.` };
   const row = await assignHour(cfg, ghl, { day, hour, ghlUserId: me.id, source: 'volunteer' });
   if (!row) return { ok: false, message: `You're already on call at ${hourLabel(hour)}.` };
   await refreshRosterMessage(cfg, { slack, team, day });
-  const done = `✅ *${hourLabel(hour)}* is covered by ${mention(me.slackUserId, me.name)}.`;
-  if (coverMessage) await slack.update(coverMessage.channel, coverMessage.ts, done, [{ type: 'section', text: { type: 'mrkdwn', text: done } }]);
-  else await rosterThread(cfg, slack, day, done);
-  return { ok: true, message: `You're on call at ${hourLabel(hour)}. It's blocked on your GHL calendar.` };
+  const covering = ((await currentRoster(cfg, day)).get(hour) || []).map((r) => team.byId.get(r.ghl_user_id)).filter(Boolean);
+  const done = `✅ *${hourLabel(hour)}* is covered by ${covering.map((p) => mention(p.slackUserId, p.name)).join(', ')}.`;
+  if (coverMessage?.ts) {
+    const msg = coverRequestMessage(day, hour, `${done}\nMore cover is welcome: tap below to join.`);
+    await slack.update(coverMessage.channel, coverMessage.ts, msg.text, msg.blocks);
+  } else {
+    await rosterThread(cfg, slack, day, `${mention(me.slackUserId, me.name)} is now also covering *${hourLabel(hour)}*.`);
+  }
+  return { ok: true, message: `You're on call at ${hourLabel(hour)}. It's on your GHL and Google calendar.` };
 }
 
 export async function openHoursFor(cfg, day) {
   const byHour = await currentRoster(cfg, day);
   return hoursToCover(cfg, day).filter((h) => (byHour.get(h) || []).length < headcountFor(cfg, h));
+}
+
+// Every remaining hour, flagged when it's short of cover. Anyone can add themselves to any hour.
+export async function coverableHours(cfg, day) {
+  const byHour = await currentRoster(cfg, day);
+  return hoursToCover(cfg, day).map((h) => ({ hour: h, count: (byHour.get(h) || []).length, open: (byHour.get(h) || []).length < headcountFor(cfg, h) }));
 }
 
 export async function myFutureSlots(cfg, team, day, slackUserId) {

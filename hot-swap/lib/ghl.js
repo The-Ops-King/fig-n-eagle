@@ -64,11 +64,29 @@ export function ghlClient(cfg, { fetchImpl = fetch, token = process.env[cfg.ghl.
       return out.sort((a, b) => a - b);
     },
 
-    // Appointments assigned to a user across all calendars.
-    async userEvents(userId, startMs, endMs) {
+    // Appointments assigned to a user across all calendars. On-call shifts are appointments too,
+    // so they're excluded by default: they aren't calls.
+    async userEvents(userId, startMs, endMs, { includeOnCall = false } = {}) {
       const q = new URLSearchParams({ locationId, userId, startTime: String(startMs), endTime: String(endMs) });
       const { events = [] } = await call(`/calendars/events?${q}`);
-      return events.filter((e) => !e.deleted && !['cancelled', 'invalid'].includes(e.appointmentStatus));
+      return events.filter((e) => !e.deleted && !['cancelled', 'invalid'].includes(e.appointmentStatus)
+        && (includeOnCall || e.calendarId !== cfg.ghl.onCall?.calendarId));
+    },
+
+    // An on-call shift: an appointment on the dedicated "Hot Swap On-Call" calendar, assigned to
+    // the person. Appointments sync to their Google Calendar and make them busy for round robin.
+    async createOnCall({ userId, startMs, endMs, title }) {
+      const { calendarId, contactId } = cfg.ghl.onCall || {};
+      if (!calendarId || !contactId) throw new Error(`Config ${cfg.client}: ghl.onCall.calendarId/contactId required`);
+      const res = await call('/calendars/events/appointments', {
+        method: 'POST',
+        body: {
+          calendarId, locationId, contactId, assignedUserId: userId, title,
+          startTime: iso(startMs), endTime: iso(endMs),
+          appointmentStatus: 'confirmed', ignoreFreeSlotValidation: true, toNotify: false,
+        },
+      });
+      return res.id || res.appointment?.id;
     },
 
     async blockedSlots(userId, startMs, endMs) {
@@ -77,13 +95,6 @@ export function ghlClient(cfg, { fetchImpl = fetch, token = process.env[cfg.ghl.
       return events.filter((e) => !e.deleted);
     },
 
-    async createBlock({ userId, startMs, endMs, title }) {
-      const res = await call('/calendars/events/block-slots', {
-        method: 'POST',
-        body: { locationId, assignedUserId: userId, startTime: iso(startMs), endTime: iso(endMs), title },
-      });
-      return res.id || res.event?.id;
-    },
 
     async deleteEvent(eventId) {
       return call(`/calendars/events/${eventId}`, { method: 'DELETE' });

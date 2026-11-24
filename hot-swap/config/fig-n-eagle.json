@@ -2,43 +2,146 @@
   "client": "fig-n-eagle",
   "displayName": "Fig & Eagle",
   "timezone": "America/New_York",
-
   "ghl": {
     "locationId": "TFjAchoN7yuxbz4BUdqd",
     "tokenEnv": "GHL_PIT_FIG_N_EAGLE",
-    "transferCalendarIds": ["5m2NwdvyFM26w0ITtZYI", "jBChHJVd25NLx7SAsVop"]
+    "transferCalendarIds": [
+      "5m2NwdvyFM26w0ITtZYI",
+      "jBChHJVd25NLx7SAsVop"
+    ],
+    "onCall": {
+      "calendarId": "phwWiiMh7igXecwDUcr4",
+      "contactId": "PUYtvOWwLOfPWTLw7JHj"
+    }
   },
-
   "slack": {
     "channelId": "C0CGM3UQ4BW",
-    "manager": { "name": "David Hess", "email": "david@catalyst.surf", "slackUserId": "U0A5AGHU0RY" }
+    "manager": {
+      "name": "David Hess",
+      "email": "david@catalyst.surf",
+      "slackUserId": "U0A5AGHU0RY"
+    }
   },
-
   "coverage": {
-    "days": [0, 1, 2, 3, 4, 5, 6],
+    "days": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
     "firstHour": 8,
     "lastHour": 20,
-    "headcount": { "default": 1, "byHour": { "13": 2, "14": 2, "15": 2, "16": 2 } },
+    "headcount": {
+      "default": 1,
+      "byHour": {
+        "13": 2,
+        "14": 2,
+        "15": 2,
+        "16": 2
+      }
+    },
     "maxConsecutiveHours": 3
   },
-
-  "schedule": { "planHour": 18, "confirmHour": 7 },
-
-  "claim": { "escalateAfterMinutes": 3 },
-
+  "schedule": {
+    "planHour": 18,
+    "confirmHour": 7
+  },
+  "claim": {
+    "escalateAfterMinutes": 3
+  },
   "blockTitle": "Hot Swap On-Call",
-
   "pool": [
-    { "name": "Riley Confer", "ghlUserId": "rl9xxm0N5VAqWXvwJfnO", "email": "riley@figandeagle.com", "role": "closer", "availabilityCalendarId": "0NE8s6W99UyYJCx7e17m", "active": true },
-    { "name": "Kaila Pidwerbeski", "ghlUserId": "xrOotmOWEJ5ajZs9ePPC", "email": "kaila@figandeagle.com", "role": "closer", "availabilityCalendarId": "EVo8rpXPtUtsyQn8KbMr", "active": true },
-    { "name": "Kad A", "ghlUserId": "ADe8b3vgue0GeF2UriAp", "email": "kad@figandeagle.com", "role": "closer", "availabilityCalendarId": "FAA3FxeWAx7ChqZpNKIs", "active": true },
-    { "name": "Christian Gill", "ghlUserId": "o61QAQzyvcGu0PGdIimL", "email": "christian@figandeagle.com", "role": "closer", "availabilityCalendarId": "LpVnprgQUjrAPZ6adnvF", "active": true },
-    { "name": "Happiness Njoku", "ghlUserId": "HuFrWypi2u6VlrQbt2oF", "email": "happiness@figandeagle.com", "role": "closer", "availabilityCalendarId": "NTMlyEWpqmcm3z9AAcMo", "active": true },
-    { "name": "Rosaline Daher", "ghlUserId": "Z9wohsm5C7HVlprjWFVE", "email": "rosalinedaher@yahoo.com", "role": "closer", "availabilityCalendarId": "NuqVGmIaDZGlWBrA3LQM", "active": true, "slackUserId": "U0C4GLDBY92" },
-    { "name": "Diana Kazumyan", "ghlUserId": "OkKMljTCMAohsP7TNH4I", "email": "diana@figandeagle.com", "role": "closer", "availabilityCalendarId": "Q5qnXmacWFFIi38m789U", "active": true },
-    { "name": "Jake Sblendorio", "ghlUserId": "7OM0JZ4yO5iLQxuuFORd", "email": "jake@figandeagle.com", "role": "closer", "availabilityCalendarId": "Yl4LhBPeDvb9WCmc3P3s", "active": true },
-    { "name": "Vince Snyder", "ghlUserId": "7fKkZ3NDlColMJRkflND", "email": "vince@figandeagle.com", "role": "closer", "availabilityCalendarId": "grAVhnpl3z9pAtiPsG0b", "active": true },
-    { "name": "Sandy Kim", "ghlUserId": "vSsC1VzaM881JZ5a3iAe", "email": "sandyk@figandeagle.com", "role": "closer", "availabilityCalendarId": "vWzbildSuVwrgEk6BSNW", "active": true },
-    { "name": "Kasia Suliga", "ghlUserId": "ofVUrMYMD91T0carZdeS", "email": "kasia@figandeagle.com", "role": "closer", "availabilityCalendarId": "zJtz3UKveB3nXM1NpREq", "active": true }
+    {
+      "name": "Riley Confer",
+      "ghlUserId": "rl9xxm0N5VAqWXvwJfnO",
+      "email": "riley@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "0NE8s6W99UyYJCx7e17m",
+      "active": true
+    },
+    {
+      "name": "Kaila Pidwerbeski",
+      "ghlUserId": "xrOotmOWEJ5ajZs9ePPC",
+      "email": "kaila@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "EVo8rpXPtUtsyQn8KbMr",
+      "active": true
+    },
+    {
+      "name": "Kad A",
+      "ghlUserId": "ADe8b3vgue0GeF2UriAp",
+      "email": "kad@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "FAA3FxeWAx7ChqZpNKIs",
+      "active": true
+    },
+    {
+      "name": "Christian Gill",
+      "ghlUserId": "o61QAQzyvcGu0PGdIimL",
+      "email": "christian@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "LpVnprgQUjrAPZ6adnvF",
+      "active": true
+    },
+    {
+      "name": "Happiness Njoku",
+      "ghlUserId": "HuFrWypi2u6VlrQbt2oF",
+      "email": "happiness@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "NTMlyEWpqmcm3z9AAcMo",
+      "active": true
+    },
+    {
+      "name": "Rosaline Daher",
+      "ghlUserId": "Z9wohsm5C7HVlprjWFVE",
+      "email": "rosalinedaher@yahoo.com",
+      "role": "closer",
+      "availabilityCalendarId": "NuqVGmIaDZGlWBrA3LQM",
+      "active": true,
+      "slackUserId": "U0C4GLDBY92"
+    },
+    {
+      "name": "Diana Kazumyan",
+      "ghlUserId": "OkKMljTCMAohsP7TNH4I",
+      "email": "diana@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "Q5qnXmacWFFIi38m789U",
+      "active": true
+    },
+    {
+      "name": "Jake Sblendorio",
+      "ghlUserId": "7OM0JZ4yO5iLQxuuFORd",
+      "email": "jake@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "Yl4LhBPeDvb9WCmc3P3s",
+      "active": true
+    },
+    {
+      "name": "Vince Snyder",
+      "ghlUserId": "7fKkZ3NDlColMJRkflND",
+      "email": "vince@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "grAVhnpl3z9pAtiPsG0b",
+      "active": true
+    },
+    {
+      "name": "Sandy Kim",
+      "ghlUserId": "vSsC1VzaM881JZ5a3iAe",
+      "email": "sandyk@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "vWzbildSuVwrgEk6BSNW",
+      "active": true
+    },
+    {
+      "name": "Kasia Suliga",
+      "ghlUserId": "ofVUrMYMD91T0carZdeS",
+      "email": "kasia@figandeagle.com",
+      "role": "closer",
+      "availabilityCalendarId": "zJtz3UKveB3nXM1NpREq",
+      "active": true
+    }
   ]
 }
