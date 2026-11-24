@@ -58,6 +58,7 @@ On-call shifts are appointments on a dedicated GHL calendar (`ghl.onCall.calenda
 | `/hotswap today` / `/hotswap tomorrow` | manager | build or refresh the roster now (edits the existing message) |
 | `/hotswap add @name` / `/hotswap remove @name` | manager | change the pool |
 | `/hotswap insights [days]` | manager | last 7 (or N) days: % of hours fully covered and which hours run short; swaps requested/claimed/never claimed, median time to claim; who hands off, takes, picks up and releases the most |
+| `/hotswap reset` → `/hotswap reset confirm` | manager, **test setup only** | wipes test on-call appointments, all appointments on the test calendars (±14 days), the app's tracked Slack messages and pending alerts, and logged activity. Keeps dates rules and pool changes. Refuses to run on a live client. |
 | `/hotswap dates` | manager | coverage exceptions: turn a date off or set custom hours (holidays), or set a weekly rule for a weekday (weekends). Date rules beat weekly rules, which beat the config. Changes to today/tomorrow apply immediately: on-call appointments outside the new hours are cancelled and new hours are filled. |
 
 ## Day-to-day config (`config/<client>.json`)

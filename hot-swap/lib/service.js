@@ -493,6 +493,42 @@ export async function escalateGaps(cfg, { slack, team }, day) {
   await store.markAlerted(cfg.client, day, open.map((h) => h.hour));
 }
 
+// ---------- test reset ----------
+
+export const isTestClient = (cfg) => /-test$/.test(cfg.client);
+
+// Wipe test activity: on-call appointments, every appointment on the test pool's own calendars
+// (+/- 14 days), the app's Slack messages and pending alerts, and logged activity.
+// Refuses to run for anything but a "-test" client.
+export async function resetTestData(cfg, { ghl, slack, team }, now = Date.now()) {
+  if (!isTestClient(cfg)) throw new Error(`Refusing to reset "${cfg.client}": reset only runs on a -test client.`);
+  const from = now - 14 * 24 * HOUR;
+  const to = now + 14 * 24 * HOUR;
+  const poolIds = new Set(team.people.map((p) => p.ghlUserId));
+  const testCalendars = (cfg.pool.include || []).map((p) => p.availabilityCalendarId).filter(Boolean);
+  const errors = [];
+  const del = async (id) => { try { await ghl.deleteEvent(id); return 1; } catch (e) { if (e.status !== 404) errors.push(e.message.slice(0, 80)); return 0; } };
+
+  let appts = 0;
+  const ids = new Set(await store.slotEventIds(cfg.client));
+  for (const e of await ghl.calendarEvents(cfg.ghl.onCall.calendarId, from, to)) if (poolIds.has(e.assignedUserId)) ids.add(e.id);
+  for (const cal of testCalendars) for (const e of await ghl.calendarEvents(cal, from, to)) ids.add(e.id);
+  for (const id of ids) appts += await del(id);
+
+  let msgs = 0;
+  try {
+    for (const m of await slack.scheduledIn(cfg.slack.channelId)) {
+      await slack.unschedule(cfg.slack.channelId, m.id).then(() => msgs++).catch(() => {});
+    }
+  } catch (e) { errors.push(`scheduled messages: ${e.message}`); }
+  for (const m of await store.trackedMessages(cfg.client)) {
+    await slack.remove(m.channel, m.ts).then(() => msgs++).catch((e) => { if (e.slackError !== 'message_not_found') errors.push(`slack: ${e.slackError || e.message}`); });
+  }
+
+  await store.wipeActivity(cfg.client);
+  return { appts, msgs, errors };
+}
+
 // ---------- insights ----------
 
 const median = (xs) => {

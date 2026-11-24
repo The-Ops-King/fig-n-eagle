@@ -94,6 +94,27 @@ export async function POST(request) {
     return new Response(null, { status: 200 });
   }
 
+  if (sub === 'reset') {
+    const responseUrl = form.get('response_url');
+    const confirmed = text.split(/\s+/)[1]?.toLowerCase() === 'confirm';
+    waitUntil(context(base).then(async (ctx) => {
+      if (ctx.team.manager.slackUserId !== user) return followUp(responseUrl, `Only ${ctx.team.manager.name} can reset.`);
+      if (!svc.isTestClient(base.cfg)) return followUp(responseUrl, `Reset only works on the test setup. This is the live setup (${base.cfg.client}), so nothing was touched.`);
+      if (!confirmed) {
+        return followUp(responseUrl, [
+          '*This wipes the test setup:*',
+          '• Deletes all test on-call appointments and every appointment on the two test calendars (past 14 days to next 14 days). A/B and closer calendars are never touched.',
+          '• Deletes the app\'s messages in this channel and any pending "unclaimed" alerts.',
+          '• Clears rosters, requests and logged activity. Your `/hotswap dates` rules and pool changes are kept.',
+          'Type `/hotswap reset confirm` to go ahead.',
+        ].join('\n'));
+      }
+      const r = await svc.resetTestData(base.cfg, ctx);
+      return followUp(responseUrl, `Reset done: ${r.appts} appointment(s) and ${r.msgs} message(s) removed, activity cleared.${r.errors.length ? `\nProblems: ${r.errors.slice(0, 5).join('; ')}` : ''}\nRun \`/hotswap today\` to start fresh.`);
+    }).catch((e) => { console.error(e); return followUp(responseUrl, `Something went wrong: ${e.message}`); }));
+    return ephemeral(confirmed ? 'Resetting the test setup…' : 'Checking…');
+  }
+
   if (sub === 'insights') {
     const responseUrl = form.get('response_url');
     const days = Math.min(Math.max(parseInt(text.split(/\s+/)[1], 10) || 7, 1), 90);

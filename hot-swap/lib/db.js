@@ -187,3 +187,27 @@ export async function markAlerted(client, day, hours) {
     await db()`INSERT INTO manager_alerts (client, day, hour) VALUES (${client}, ${day}, ${h}) ON CONFLICT DO NOTHING`;
   }
 }
+
+// ---- test reset ----
+export async function trackedMessages(client) {
+  return db()`
+    SELECT channel, ts FROM roster_posts WHERE client = ${client}
+    UNION SELECT channel, ts FROM cover_messages WHERE client = ${client}
+    UNION SELECT channel, ts FROM gap_boards WHERE client = ${client}
+    UNION SELECT channel, ts FROM swap_requests WHERE client = ${client} AND ts IS NOT NULL`;
+}
+
+export async function slotEventIds(client) {
+  const rows = await db()`SELECT DISTINCT block_event_id FROM roster_slots WHERE client = ${client} AND block_event_id IS NOT NULL`;
+  return rows.map((r) => r.block_event_id);
+}
+
+// Activity only. Settings (coverage_rules, pool_overrides) are kept.
+export async function wipeActivity(client) {
+  await db()`DELETE FROM roster_slots WHERE client = ${client}`;
+  await db()`DELETE FROM roster_posts WHERE client = ${client}`;
+  await db()`DELETE FROM swap_requests WHERE client = ${client}`;
+  await db()`DELETE FROM cover_messages WHERE client = ${client}`;
+  await db()`DELETE FROM gap_boards WHERE client = ${client}`;
+  await db()`DELETE FROM manager_alerts WHERE client = ${client}`;
+}

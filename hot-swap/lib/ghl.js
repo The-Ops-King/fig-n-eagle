@@ -75,6 +75,13 @@ export function ghlClient(cfg, { fetchImpl = fetch, token = process.env[cfg.ghl.
         && (includeOnCall || e.calendarId !== cfg.ghl.onCall?.calendarId));
     },
 
+    // Every event on one calendar in a window (all statuses).
+    async calendarEvents(calendarId, startMs, endMs) {
+      const q = new URLSearchParams({ locationId, calendarId, startTime: String(startMs), endTime: String(endMs) });
+      const { events = [] } = await call(`/calendars/events?${q}`);
+      return events.filter((e) => !e.deleted);
+    },
+
     // An on-call shift: an appointment on the dedicated "Hot Swap On-Call" calendar, assigned to
     // the person. Appointments sync to their Google Calendar and make them busy for round robin.
     async createOnCall({ userId, startMs, endMs, title }) {
