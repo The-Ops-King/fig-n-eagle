@@ -122,7 +122,7 @@ async function currentRoster(cfg, day) {
   return byHour;
 }
 
-export function renderRoster(cfg, team, day, byHour, now = Date.now()) {
+export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = Date.now() } = {}) {
   const name = (id) => team.byId.get(id);
   const hours = cfg.coverage.days.includes(weekdayOf(day)) ? coverageHours(cfg) : [];
   const lines = hours.map((h) => {
@@ -134,7 +134,7 @@ export function renderRoster(cfg, team, day, byHour, now = Date.now()) {
     if (ids.length < want) return `*${hourLabel(h)}*: ${who}  ⚠️ short ${want - ids.length}`;
     return `*${hourLabel(h)}*: ${who}`;
   });
-  const text = `Hot-swap coverage for ${formatDay(day)} (ET)`;
+  const text = `${phase === 'plan' ? "Tomorrow's hot-swap plan" : "Today's hot-swap roster"}: ${formatDay(day)} (ET)`;
   const blocks = [
     { type: 'header', text: { type: 'plain_text', text } },
     { type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') || '_No coverage hours today._' } },
@@ -151,17 +151,25 @@ export function renderRoster(cfg, team, day, byHour, now = Date.now()) {
   return { text, blocks };
 }
 
-export async function postRoster(cfg, { ghl, slack, team, day }) {
+// Night before (phase 'plan') and morning (phase 'confirm'):
+// build/extend the roster, block hours in GHL, post a fresh roster message, DM the manager gaps.
+// Re-running keeps existing assignments and only fills holes, so the morning run picks up
+// anyone who became free overnight.
+export async function publishRoster(cfg, { ghl, slack, team, day, phase }) {
   const result = await buildRoster(cfg, { ghl, team, day, apply: true });
   const byHour = await currentRoster(cfg, day);
-  const msg = renderRoster(cfg, team, day, byHour);
-  const prev = await store.getRosterPost(cfg.client, day);
-  let ts = prev?.ts;
-  if (prev) await slack.update(prev.channel, prev.ts, msg.text, msg.blocks);
-  else ts = (await slack.post(cfg.slack.channelId, msg.text, msg.blocks)).ts;
+  const msg = renderRoster(cfg, team, day, byHour, { phase });
+  const { ts } = await slack.post(cfg.slack.channelId, msg.text, msg.blocks);
   await store.saveRosterPost(cfg.client, day, cfg.slack.channelId, ts);
-  if (result.errors.length && team.manager.slackUserId) {
-    await slack.dm(team.manager.slackUserId, `Hot-swap roster for ${formatDay(day)} had problems:\n• ${result.errors.join('\n• ')}`);
+
+  if (team.manager.slackUserId && result.hours.length) {
+    const label = phase === 'plan' ? `Tomorrow's hot-swap plan (${formatDay(day)})` : `Today's hot-swap roster (${formatDay(day)})`;
+    const gapLines = result.gaps.map((g) => `• ${hourLabel(g.hour)} ET: need ${g.missing} more`);
+    const parts = [result.gaps.length
+      ? `${label}: *${result.gaps.length} hour(s) without enough cover.*\n${gapLines.join('\n')}\nAnyone in the pool can take an open hour with *Cover an open hour* on the roster.`
+      : `${label}: every hour is covered. ✅`];
+    if (result.errors.length) parts.push(`Problems:\n• ${result.errors.join('\n• ')}`);
+    await slack.dm(team.manager.slackUserId, parts.join('\n\n'));
   }
   return result;
 }
@@ -170,7 +178,8 @@ async function refreshRosterMessage(cfg, { slack, team, day }) {
   const post = await store.getRosterPost(cfg.client, day);
   if (!post) return;
   const byHour = await currentRoster(cfg, day);
-  const msg = renderRoster(cfg, team, day, byHour);
+  const today = dateKey(Date.now(), cfg.timezone);
+  const msg = renderRoster(cfg, team, day, byHour, { phase: day > today ? 'plan' : 'confirm' });
   await slack.update(post.channel, post.ts, msg.text, msg.blocks);
 }
 
@@ -178,20 +187,6 @@ async function rosterThread(cfg, slack, day, text) {
   const post = await store.getRosterPost(cfg.client, day);
   if (post) await slack.post(post.channel, text, undefined, { thread_ts: post.ts });
   else await slack.post(cfg.slack.channelId, text);
-}
-
-// Evening preview for the manager: tomorrow's gaps, nothing written.
-export async function previewTomorrow(cfg, { ghl, slack, team, now = Date.now() }) {
-  const day = nextDateKey(dateKey(now, cfg.timezone));
-  const r = await buildRoster(cfg, { ghl, team, day, apply: false, now: hourStart(day, 0, cfg.timezone) });
-  if (!team.manager.slackUserId) return r;
-  if (!r.hours.length) return r;
-  const gapLines = r.gaps.map((g) => `• ${hourLabel(g.hour)}: need ${g.missing} more`);
-  const text = r.gaps.length
-    ? `Hot-swap preview for ${formatDay(day)}: *${r.gaps.length} hour(s) without enough free people.*\n${gapLines.join('\n')}\nLine up cover tonight. Anyone in the pool can claim an open hour after the roster posts.`
-    : `Hot-swap preview for ${formatDay(day)}: every hour has cover. ✅`;
-  await slack.dm(team.manager.slackUserId, text);
-  return r;
 }
 
 // Person can't make one of their hours: free it, find a replacement, update the roster.

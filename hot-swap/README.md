@@ -6,8 +6,8 @@ Makes sure someone is always lined up to take a closer's call when the closer ca
 
 | When | What happens |
 |---|---|
-| **Evening (~6–7 PM ET)** | Manager gets a DM previewing tomorrow's coverage and any hours nobody is free. Nothing is written. |
-| **Morning (~6–7 AM ET)** | Builds today's roster from GHL availability, **blocks each on-call hour on that person's GHL calendar** (so round robin won't book them), and posts the roster in the channel. |
+| **6 PM ET, night before** | Builds tomorrow's roster from GHL availability, **blocks each on-call hour on that person's GHL calendar** (so overnight bookings can't take it), posts "Tomorrow's hot-swap plan", and DMs the manager any gaps so cover can be lined up tonight. |
+| **7 AM ET, morning of** | Re-checks today. Keeps everyone already assigned, fills any gaps with people who became free overnight, posts "Today's hot-swap roster", and DMs the manager what's still open. |
 | **"Can't make my hour"** | Frees the hour in GHL, picks the next free person, blocks it for them, updates the roster, posts in the thread. If nobody's free, tags the manager. |
 | **"Cover an open hour"** | Anyone in the pool can take an open hour if their GHL calendar is free. |
 | **Hot swap request** (`/hotswap`, the global shortcut, or the roster button) | Closer picks one of their next calls. The bot tags whoever is on call that hour. **First to click "I've got it" wins**: the GHL appointment is reassigned to them (they get the credit). No claim after 3 min: it escalates to the whole pool plus the manager. Calls starting within 3 min, or hours with nobody on call, go to everyone immediately. |
@@ -21,8 +21,7 @@ For each person, the bot asks GHL for bookable slots on their own calendar (`ava
 ```
 api/slack/interactions.js  buttons, modals, global shortcut
 api/slack/commands.js      /hotswap
-api/cron/roster.js         morning roster (GET, Bearer CRON_SECRET; ?day=YYYY-MM-DD to re-run)
-api/cron/preview.js        evening gap preview
+api/cron/tick.js           hourly; runs 'plan' at schedule.planHour and 'confirm' at schedule.confirmHour (local time)
 lib/                       ghl, slack, db, roster planner, time zones, orchestration
 config/<client>.json       everything client-specific (pool, hours, headcount, channel)
 db/schema.sql              run once
@@ -37,15 +36,16 @@ slack-manifest.yaml        Slack app definition
 4. **Slack app**: api.slack.com/apps → Create New App → From manifest → paste `slack-manifest.yaml` with your Vercel domain in place of `YOUR-DEPLOYMENT`. Install to the workspace. Invite the bot to the hot-transfer channel (`/invite @Hot Swap`).
 5. **Env vars** (Vercel → Settings → Environment Variables), see `.env.example`:
    `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `CRON_SECRET`, `GHL_PIT_FIG_N_EAGLE`, `HOT_SWAP_CLIENT=fig-n-eagle`.
-6. **Config**: in `config/fig-n-eagle.json` set `slack.channelId` (channel → View details → bottom). For anyone whose GHL email isn't their Slack email (e.g. Rosaline), set `slackUserId`.
-7. Deploy. Then trigger the first roster by hand:
-   `curl -H "Authorization: Bearer $CRON_SECRET" https://<domain>/api/cron/roster`
+6. **Config**: `config/fig-n-eagle.json` has `slack.channelId` (currently #sd-call-transfer) and Slack IDs for David and Rosaline already set. For anyone else whose GHL email isn't their Slack email, set `slackUserId`.
+7. Deploy. Then trigger a run by hand:
+   `curl -H "Authorization: Bearer $CRON_SECRET" "https://<domain>/api/cron/tick?phase=confirm"` (today) or `?phase=plan` (tomorrow).
 
 ## Day-to-day config (`config/<client>.json`)
 - `pool`: who can be on call. Add setters with `"role": "setter"` and their own GHL calendar as `availabilityCalendarId`. Set `"active": false` to pause someone.
 - `coverage.firstHour` / `lastHour`: local hours (8 → 20 means 8 AM through the 8 PM hour, i.e. 8 AM ET to 5 PM PT).
 - `coverage.days`: 0 = Sunday … 6 = Saturday.
 - `coverage.headcount`: people per hour (`byHour` overrides `default`).
+- `schedule.planHour` / `confirmHour`: local hours for the night-before plan and the morning confirm.
 - `claim.escalateAfterMinutes`: when an unclaimed request goes to everyone.
 
 ## Adding another client
@@ -54,7 +54,7 @@ Copy `config/fig-n-eagle.json` to `config/<client>.json`, fill it in, and deploy
 ## Not verified yet (test before relying on it)
 1. **GHL block slot by user** (`POST /calendars/events/block-slots` with `assignedUserId`, no `calendarId`) actually stops round robin on calendars A/B from booking that person in that hour.
 2. **Reassignment** (`PUT /calendars/events/appointments/{id}` with `assignedUserId`, `ignoreFreeSlotValidation`) changes the owner. Check what happens to the Zoom link and the confirmation messages the prospect gets.
-3. **Cron timing**: on Vercel's Hobby plan, cron jobs run once a day and only to within the hour, so the roster posts somewhere between about 6 and 7 AM ET. Pro plans run on the minute. Crons are in UTC (`0 11 * * *` = 6 AM EST / 7 AM EDT).
+3. **Cron plan**: the hourly cron needs Vercel Pro or Team (Hobby allows only daily crons). It checks local time itself, so daylight saving is handled.
 4. The Slack and GHL flows (request, claim, release, volunteer) are only covered by unit tests for the planner, time zones and signature checks. Run them end to end on a test appointment before going live.
 
 ## Phase 2
