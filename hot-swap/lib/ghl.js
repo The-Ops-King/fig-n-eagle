@@ -139,6 +139,10 @@ export function ghlClient(cfg, { fetchImpl = fetch, token = process.env[cfg.ghl.
       return res.appointment || res.event || res;
     },
 
+    async setAppointmentTitle(eventId, title) {
+      return call(`/calendars/events/appointments/${eventId}`, { method: 'PUT', body: { title, ignoreFreeSlotValidation: true } });
+    },
+
     // null when the event no longer exists.
     async findEvent(eventId) {
       try { return await this.getAppointment(eventId); } catch (e) {

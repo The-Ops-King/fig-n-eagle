@@ -20,7 +20,7 @@ export async function poolFromGhl(cfg, ghl, overrides = []) {
       if (!owner || (cal.teamMembers || []).length !== 1 || byId.has(owner)) continue;
       const u = await ghl.user(owner);
       if (!u || u.deleted) continue;
-      byId.set(owner, { name: u.name || [u.firstName, u.lastName].filter(Boolean).join(' '), ghlUserId: owner, email: (u.email || '').toLowerCase(), role: 'closer', availabilityCalendarId: cal.id });
+      byId.set(owner, { name: u.name || [u.firstName, u.lastName].filter(Boolean).join(' '), firstName: u.firstName, ghlUserId: owner, email: (u.email || '').toLowerCase(), role: 'closer', availabilityCalendarId: cal.id });
     }
   }
   for (const p of pool.include || []) byId.set(p.ghlUserId, { role: 'setter', ...p });
@@ -134,7 +134,7 @@ export async function buildRoster(cfg, { ghl, team, day, apply, now = Date.now()
       for (const id of ids) {
         if ((locked.get(hour) || []).includes(id)) continue;
         try {
-          await assignHour(cfg, ghl, { day, hour, ghlUserId: id, source: 'auto' });
+          await assignHour(cfg, ghl, { day, hour, ghlUserId: id, source: 'auto', team });
         } catch (e) {
           errors.push(`${team.byId.get(id)?.name} ${hourLabel(hour)}: ${e.message}`);
         }
@@ -142,6 +142,18 @@ export async function buildRoster(cfg, { ghl, team, day, apply, now = Date.now()
     }
   }
   return { day, hours, ...plan, errors };
+}
+
+// "(Tyler) Hot Swap On-Call". First name, skipping a leading initial ("J Tyler Ray" -> "Tyler").
+export function shortName(p) {
+  const words = String(p?.firstName || p?.name || '').trim().split(/\s+/).filter(Boolean);
+  const first = words.find((w) => w.replace(/\./g, '').length > 1) || words[0] || '';
+  return first;
+}
+
+function onCallTitle(cfg, team, ghlUserId) {
+  const who = shortName(team.byId.get(ghlUserId));
+  return who ? `(${who}) ${cfg.blockTitle}` : cfg.blockTitle;
 }
 
 // Make sure every assigned hour really has an on-call appointment in GHL:
@@ -157,13 +169,17 @@ async function repairSlots(cfg, ghl, team, day) {
       const ev = slot.block_event_id ? await ghl.findEvent(slot.block_event_id) : null;
       const isOnCall = ev && ev.calendarId === onCal;
       const gone = !ev || ev.deleted || ['cancelled', 'invalid'].includes(ev.appointmentStatus);
-      if (isOnCall && !gone) continue;
+      if (isOnCall && !gone) {
+        const want = onCallTitle(cfg, team, slot.ghl_user_id);
+        if (ev.title !== want) await ghl.setAppointmentTitle(slot.block_event_id, want);
+        continue;
+      }
       if (isOnCall && gone) { await store.releaseSlot(slot.id); continue; }
       // Legacy block (or missing id): convert to an on-call appointment.
       if (slot.block_event_id) await ghl.deleteEvent(slot.block_event_id).catch(() => {}); // remove leftover block
       if (!team.byId.has(slot.ghl_user_id)) { await store.releaseSlot(slot.id); continue; }
       const start = hourStart(day, slot.hour, cfg.timezone);
-      const id = await ghl.createOnCall({ userId: slot.ghl_user_id, startMs: start, endMs: start + HOUR, title: cfg.blockTitle });
+      const id = await ghl.createOnCall({ userId: slot.ghl_user_id, startMs: start, endMs: start + HOUR, title: onCallTitle(cfg, team, slot.ghl_user_id) });
       await store.setSlotEvent(slot.id, id);
     } catch (e) {
       errors.push(`${name} ${hourLabel(slot.hour)}: ${e.message}`);
@@ -172,9 +188,10 @@ async function repairSlots(cfg, ghl, team, day) {
   return errors;
 }
 
-async function assignHour(cfg, ghl, { day, hour, ghlUserId, source }) {
+async function assignHour(cfg, ghl, { day, hour, ghlUserId, source, team }) {
   const start = hourStart(day, hour, cfg.timezone);
-  const eventId = await ghl.createOnCall({ userId: ghlUserId, startMs: start, endMs: start + HOUR, title: cfg.blockTitle });
+  const title = team ? onCallTitle(cfg, team, ghlUserId) : cfg.blockTitle;
+  const eventId = await ghl.createOnCall({ userId: ghlUserId, startMs: start, endMs: start + HOUR, title });
   const row = await store.insertSlot({ client: cfg.client, day, hour, ghlUserId, blockEventId: eventId, source });
   if (!row && eventId) await ghl.deleteEvent(eventId).catch(() => {}); // already assigned: undo the duplicate
   return row;
@@ -317,7 +334,7 @@ export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUse
   if (hourStart(day, hour, cfg.timezone) + HOUR <= Date.now()) return { ok: false, message: `${hourLabel(hour)} is already over.` };
   const [a] = await availability(cfg, ghl, [me], day, [hour]);
   if (!a.free.has(hour)) return { ok: false, message: `Your GHL calendar isn't free for all of ${hourLabel(hour)}.` };
-  const row = await assignHour(cfg, ghl, { day, hour, ghlUserId: me.id, source: 'volunteer' });
+  const row = await assignHour(cfg, ghl, { day, hour, ghlUserId: me.id, source: 'volunteer', team });
   if (!row) return { ok: false, message: `You're already on call at ${hourLabel(hour)}.` };
   await refreshRosterMessage(cfg, { slack, team, day });
   const covering = ((await currentRoster(cfg, day)).get(hour) || []).map((r) => team.byId.get(r.ghl_user_id)).filter(Boolean);
