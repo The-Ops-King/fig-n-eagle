@@ -7,7 +7,7 @@
 //   with header  Authorization: Bearer $CRON_SECRET
 import { context } from '../../lib/context.js';
 import { dateKey, nextDateKey, parts } from '../../lib/time.js';
-import { publishRoster } from '../../lib/service.js';
+import { publishRoster, sweepCoverMessages } from '../../lib/service.js';
 
 export async function GET(request) {
   if (request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -21,6 +21,9 @@ export async function GET(request) {
   const localHour = parts(now, cfg.timezone).hour;
   const planHour = cfg.schedule?.planHour ?? 18;
   const confirmHour = cfg.schedule?.confirmHour ?? 7;
+
+  // Every hour: drop "needs cover" messages for hours that got covered or are over.
+  await sweepCoverMessages(cfg, ctx.slack).catch((e) => console.error('sweep failed', e));
 
   let phase = url.searchParams.get('phase');
   if (!phase) phase = localHour === planHour ? 'plan' : localHour === confirmHour ? 'confirm' : null;

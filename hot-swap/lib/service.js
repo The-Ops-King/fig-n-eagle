@@ -263,6 +263,7 @@ export async function publishRoster(cfg, { ghl, slack, team, day, phase, fresh =
   }
   const byHour = await currentRoster(cfg, day);
   const msg = renderRoster(cfg, team, day, byHour, { phase });
+  await clearCoverMessages(cfg, slack, day).catch((e) => result.errors.push(`Cleaning up cover messages: ${e.message}`));
   const prev = fresh ? null : await store.getRosterPost(cfg.client, day);
   if (prev) {
     await slack.update(prev.channel, prev.ts, msg.text, msg.blocks);
@@ -321,7 +322,8 @@ export async function releaseHour(cfg, { ghl, slack, team, day, slotId, slackUse
     ? `Free then: ${free.map((p) => mention(p.slackUserId, p.name)).join(' ')}`
     : `Nobody is free then. ${mention(team.manager.slackUserId, team.manager.name)}, this hour needs cover.`;
   const msg = coverRequestMessage(day, slot.hour, `${mention(me?.slackUserId, me?.name)} can't make *${hourLabel(slot.hour)}*. It's *NOT COVERED*.\n${who}`);
-  await rosterThread(cfg, slack, day, msg.text, msg.blocks);
+  const posted = await rosterThread(cfg, slack, day, msg.text, msg.blocks);
+  if (posted?.ts) await store.addCoverMessage({ client: cfg.client, day, hour: slot.hour, channel: posted.channel, ts: posted.ts });
   return { ok: true, message: `Released ${hourLabel(slot.hour)}. It's marked not covered and the free people were tagged.` };
 }
 
@@ -339,7 +341,7 @@ function coverRequestMessage(day, hour, text) {
 
 // Someone takes an open hour, up to that hour's headcount.
 // The hour already under way can always be taken unless the person has a call during the rest of it.
-export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUserId, coverMessage }) {
+export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUserId }) {
   const me = await personForSlackUser(team, slack, slackUserId);
   if (!me) return { ok: false, message: "You're not in the hot-swap pool. Ask your manager to add you." };
   const hStart = hourStart(day, hour, cfg.timezone);
@@ -375,17 +377,31 @@ export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUse
   }
 
   await refreshRosterMessage(cfg, { slack, team, day });
-  const covering = after.slice(0, headcountFor(cfg, hour)).map((r) => team.byId.get(r.ghl_user_id)).filter(Boolean);
-  const done = `✅ *${hourLabel(hour)}* is covered by ${covering.map((p) => mention(p.slackUserId, p.name)).join(', ')}.`;
-  const stillOpen = covering.length < headcountFor(cfg, hour);
-  if (coverMessage?.ts) {
-    const msg = stillOpen ? coverRequestMessage(day, hour, `${done}\nStill needs ${headcountFor(cfg, hour) - covering.length} more.`)
-      : { text: done, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: done } }] };
-    await slack.update(coverMessage.channel, coverMessage.ts, msg.text, msg.blocks);
-  } else {
-    await rosterThread(cfg, slack, day, `${mention(me.slackUserId, me.name)} picked up *${hourLabel(hour)}*.`);
-  }
+  await clearCoverMessages(cfg, slack, day);
   return { ok: true, message: `You're on call at ${hourLabel(hour)}. It's on your GHL and Google calendar.` };
+}
+
+// Delete "needs cover" messages for hours that are now fully covered or already over,
+// so the channel only shows hours that still need someone.
+export async function clearCoverMessages(cfg, slack, day) {
+  const byHour = await currentRoster(cfg, day);
+  for (const m of await store.coverMessages(cfg.client, day)) {
+    const full = (byHour.get(m.hour) || []).length >= headcountFor(cfg, m.hour);
+    const over = hourStart(day, m.hour, cfg.timezone) + HOUR <= Date.now();
+    if (!full && !over) continue;
+    await slack.remove(m.channel, m.ts).catch((e) => { if (e.slackError !== 'message_not_found') throw e; });
+    await store.removeCoverMessage(m.channel, m.ts);
+  }
+}
+
+// Hourly housekeeping: today's covered/finished requests plus anything left from earlier days.
+export async function sweepCoverMessages(cfg, slack, now = Date.now()) {
+  const today = dateKey(now, cfg.timezone);
+  await clearCoverMessages(cfg, slack, today);
+  for (const m of await store.staleCoverMessages(cfg.client, today)) {
+    await slack.remove(m.channel, m.ts).catch(() => {});
+    await store.removeCoverMessage(m.channel, m.ts);
+  }
 }
 
 export async function openHoursFor(cfg, day) {

@@ -61,10 +61,7 @@ export async function POST(request) {
         return openModal('Cover an hour', async () => volunteerView(day, await svc.coverableHours(cfg, day)));
       case 'cover_hour': {
         const [coverDay, coverHour] = String(action.value).split('|');
-        background((ctx) => svc.volunteerHour(cfg, {
-          ...ctx, day: coverDay, hour: Number(coverHour), slackUserId: user,
-          coverMessage: { channel: payload.channel?.id, ts: payload.message?.ts },
-        }));
+        background((ctx) => svc.volunteerHour(cfg, { ...ctx, day: coverDay, hour: Number(coverHour), slackUserId: user }));
         return empty();
       }
       case 'claim':

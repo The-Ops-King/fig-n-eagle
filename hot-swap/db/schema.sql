@@ -63,3 +63,13 @@ CREATE TABLE IF NOT EXISTS pool_overrides (
   changed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (client, ghl_user_id)
 );
+
+-- Open "can't make it, needs cover" messages, so they can be deleted once the hour is covered.
+CREATE TABLE IF NOT EXISTS cover_messages (
+  client   TEXT     NOT NULL,
+  day      DATE     NOT NULL,
+  hour     SMALLINT NOT NULL,
+  channel  TEXT     NOT NULL,
+  ts       TEXT     NOT NULL,
+  PRIMARY KEY (channel, ts)
+);

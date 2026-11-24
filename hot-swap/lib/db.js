@@ -121,3 +121,19 @@ export async function futureSlotsFor(client, ghlUserId, fromDay) {
 export async function setSlotEvent(id, eventId) {
   await db()`UPDATE roster_slots SET block_event_id = ${eventId} WHERE id = ${id}`;
 }
+
+export async function addCoverMessage({ client, day, hour, channel, ts }) {
+  await db()`INSERT INTO cover_messages (client, day, hour, channel, ts) VALUES (${client}, ${day}, ${hour}, ${channel}, ${ts}) ON CONFLICT DO NOTHING`;
+}
+
+export async function coverMessages(client, day) {
+  return db()`SELECT * FROM cover_messages WHERE client = ${client} AND day = ${day}`;
+}
+
+export async function staleCoverMessages(client, beforeDay) {
+  return db()`SELECT * FROM cover_messages WHERE client = ${client} AND day < ${beforeDay}`;
+}
+
+export async function removeCoverMessage(channel, ts) {
+  await db()`DELETE FROM cover_messages WHERE channel = ${channel} AND ts = ${ts}`;
+}
