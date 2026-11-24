@@ -353,6 +353,23 @@ function coverRequestMessage(day, hour, text) {
   };
 }
 
+// Name what makes someone look busy in an hour: blocked time on their GHL calendar (including
+// events synced from Google/Catalyst) and non-call appointments. Empty when GHL doesn't say
+// (outside working hours, or a private event).
+async function whatBlocks(cfg, ghl, person, from, to) {
+  const overlaps = (e) => Date.parse(e.startTime) < to && Date.parse(e.endTime) > from;
+  const [blocks, events] = await Promise.all([
+    ghl.blockedSlots(person.ghlUserId, from - 12 * HOUR, to).catch(() => []),
+    ghl.userEvents(person.ghlUserId, from - 12 * HOUR, to, { includeOnCall: true }).catch(() => []),
+  ]);
+  const seen = new Set();
+  return [...blocks, ...events.filter((e) => e.calendarId !== cfg.ghl.onCall?.calendarId)]
+    .filter(overlaps)
+    .map((e) => ({ title: (e.title || 'Busy').trim(), start: Date.parse(e.startTime), end: Date.parse(e.endTime) }))
+    .filter((b) => { const k = `${b.title}|${b.start}`; if (seen.has(k)) return false; seen.add(k); return true; })
+    .sort((a, b) => a.start - b.start);
+}
+
 // Put `person` on call for an hour (volunteer or manager assignment), up to the hour's headcount.
 // A real GHL call in that hour always blocks it (no double-booking a prospect). The person's
 // calendar availability (working hours, linked Google/Catalyst busy time) blocks it too unless
@@ -377,7 +394,10 @@ async function takeHour(cfg, { ghl, slack, team }, { day, hour, person, source, 
   if (clash) return { ok: false, message: `${who} has a call at ${formatTime(Date.parse(clash.startTime), cfg.timezone)} ET during ${hourLabel(hour)}.` };
   if (!force && now < hStart) {
     const [a] = await availability(cfg, ghl, [person], day, [hour]);
-    if (!a.free.has(hour)) return { ok: false, calendarBusy: true, message: `${who}'s calendar shows busy at ${hourLabel(hour)} ET.` };
+    if (!a.free.has(hour)) {
+      const blockers = await whatBlocks(cfg, ghl, person, hStart, hEnd);
+      return { ok: false, calendarBusy: true, blockers, message: `${who}'s calendar shows busy at ${hourLabel(hour)} ET.` };
+    }
   }
 
   const row = await assignHour(cfg, ghl, { day, hour, ghlUserId: person.id, source, team });
@@ -402,7 +422,12 @@ export async function volunteerHour(cfg, ctx) {
   const r = await takeHour(cfg, ctx, { day, hour, person: me, source: 'volunteer', force });
   if (r.ok) return { ok: true, message: `You're on call at ${hourLabel(hour)}. It's on your GHL and Google calendar.` };
   if (r.calendarBusy) {
-    const text = `Your calendar shows you busy at ${hourLabel(hour)} ET. If you can still take transfers then, cover it anyway.`;
+    const tz = cfg.timezone;
+    const what = (r.blockers || []).slice(0, 3)
+      .map((b) => `*${b.title}* (${formatTime(b.start, tz)}–${formatTime(b.end, tz)} ET)`).join(', ');
+    const text = what
+      ? `Your calendar has ${what} during ${hourLabel(hour)}. Are you sure you can take transfers then?`
+      : `Your calendar shows you unavailable at ${hourLabel(hour)} ET (outside your working hours, or a private event). Are you sure you can take transfers then?`;
     return {
       ok: false, message: text,
       blocks: [
