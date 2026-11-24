@@ -70,6 +70,15 @@ export async function POST(request) {
         background((ctx) => svc.volunteerHour(cfg, { ...ctx, day: coverDay, hour: Number(coverHour), slackUserId: user }));
         return empty();
       }
+      case 'assign_claim': {
+        const requestId = String(action.block_id || '').replace(/^req_/, '');
+        const pick = action.selected_user;
+        background(async (ctx) => {
+          if (ctx.team.manager.slackUserId !== user) return { message: `Only ${ctx.team.manager.name} can assign a hot swap. Use "I've got it" to take it yourself.` };
+          return svc.claimSwap(cfg, { ...ctx, requestId, slackUserId: pick, assignedBy: user });
+        });
+        return empty();
+      }
       case 'claim':
         background((ctx) => svc.claimSwap(cfg, { ...ctx, requestId: action.value, slackUserId: user }));
         return empty();

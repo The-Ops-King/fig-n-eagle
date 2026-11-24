@@ -6,6 +6,7 @@
 //   /hotswap pool       list who's in the pool
 //   /hotswap dates      coverage exceptions by date / weekday (manager only)
 //   /hotswap insights [days]   coverage + swap stats (manager only)
+//   /hotswap assign @name 3pm [tomorrow]   manager puts someone on call
 //   /hotswap help       explain commands and buttons
 // Request URL: https://<deployment>/api/slack/commands
 import { waitUntil } from '@vercel/functions';
@@ -32,10 +33,23 @@ const HELP = [
   '• `/hotswap today` / `/hotswap tomorrow`: build or refresh the roster now (fills open hours, keeps existing assignments).',
   '• `/hotswap add @name` / `/hotswap remove @name`: add someone to the pool (e.g. a setter) or take them out (frees their hours).',
   '• `/hotswap insights` (or `/hotswap insights 30`): coverage, swap and claim stats for the last 7 (or N) days.',
+  '• `/hotswap assign @name 3pm` (add `tomorrow` for tomorrow): put someone on call for an hour. On a hot-swap request, use *Manager: assign to…* to give the call to someone.',
   '• `/hotswap dates`: turn coverage off or change the hours for a date (holidays) or every week on a weekday (weekends).',
   '',
   '_Schedule: tomorrow\'s plan posts at 6 PM ET, today\'s roster at 7 AM ET. On-call hours appear on your GHL and Google calendar as "(Name) Hot Swap On-Call"._',
 ].join('\n');
+
+// "3pm", "3 pm", "15", "3:00pm", "9am". Bare 1-7 means PM, 8-11 AM, 12 noon.
+function parseHour(str) {
+  const m = String(str).match(/\b(\d{1,2})(?::00)?\s*(am|pm)?\b/i);
+  if (!m) return null;
+  let h = Number(m[1]);
+  const ap = m[2]?.toLowerCase();
+  if (ap === 'pm' && h < 12) h += 12;
+  else if (ap === 'am' && h === 12) h = 0;
+  else if (!ap && h >= 1 && h <= 7) h += 12;
+  return h >= 0 && h <= 23 ? h : null;
+}
 
 const ephemeral = (text) => new Response(JSON.stringify({ response_type: 'ephemeral', text }), {
   status: 200, headers: { 'Content-Type': 'application/json' },
@@ -123,6 +137,22 @@ export async function POST(request) {
       return followUp(responseUrl, await svc.insights(base.cfg, ctx.team, days));
     }).catch((e) => { console.error(e); return followUp(responseUrl, `Something went wrong: ${e.message}`); }));
     return ephemeral('Crunching the numbers…');
+  }
+
+  if (sub === 'assign') {
+    const responseUrl = form.get('response_url');
+    const target = text.match(/<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/)?.[1];
+    const hour = parseHour(text.replace(/<@[^>]+>/g, ''));
+    const tomorrowWanted = /\btomorrow\b/i.test(text);
+    waitUntil(context(base).then(async (ctx) => {
+      if (ctx.team.manager.slackUserId !== user) return followUp(responseUrl, `Only ${ctx.team.manager.name} can assign hours.`);
+      if (!target || hour == null) return followUp(responseUrl, 'Usage: `/hotswap assign @name 3pm` (add `tomorrow` for tomorrow).');
+      const today = dateKey(Date.now(), base.cfg.timezone);
+      const day = tomorrowWanted ? nextDateKey(today) : today;
+      const r = await svc.assignHourTo(base.cfg, ctx, { day, hour, slackUserId: target, by: user });
+      return followUp(responseUrl, r.message);
+    }).catch((e) => { console.error(e); return followUp(responseUrl, `Something went wrong: ${e.message}`); }));
+    return ephemeral('Assigning…');
   }
 
   if (sub === 'add' || sub === 'remove' || sub === 'pool') {

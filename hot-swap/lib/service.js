@@ -353,73 +353,59 @@ function coverRequestMessage(day, hour, text) {
   };
 }
 
-// Someone takes an open hour, up to that hour's headcount.
-// The hour already under way can always be taken unless the person has a call during the rest of it.
-export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUserId }) {
-  const me = await personForSlackUser(team, slack, slackUserId);
-  if (!me) return { ok: false, message: "You're not in the hot-swap pool. Ask your manager to add you." };
+// Put `person` on call for an hour (volunteer or manager assignment), up to the hour's headcount.
+// A person who opts in knows their own day, so only a real call in that hour blocks it; GHL
+// working hours / Google busy times are only used when the app picks people automatically.
+async function takeHour(cfg, { ghl, slack, team }, { day, hour, person, source }) {
   const hStart = hourStart(day, hour, cfg.timezone);
   const hEnd = hStart + HOUR;
   const now = Date.now();
+  const who = person.name.split(' ')[0];
   if (hEnd <= now) return { ok: false, message: `${hourLabel(hour)} is already over.` };
 
   const coveringNow = () => currentRoster(cfg, day).then((m) => m.get(hour) || []);
   const before = await coveringNow();
-  if (before.some((r) => r.ghl_user_id === me.id)) return { ok: false, message: `You're already on call at ${hourLabel(hour)}.` };
+  if (before.some((r) => r.ghl_user_id === person.id)) return { ok: false, message: `${who} is already on call at ${hourLabel(hour)}.` };
   if (before.length >= headcountFor(cfg, hour)) {
-    const who = before.map((r) => team.byId.get(r.ghl_user_id)?.name).filter(Boolean).join(', ');
-    return { ok: false, message: `${hourLabel(hour)} is already covered${who ? ` by ${who}` : ''}.` };
+    const names = before.map((r) => team.byId.get(r.ghl_user_id)?.name).filter(Boolean).join(', ');
+    return { ok: false, message: `${hourLabel(hour)} is already covered${names ? ` by ${names}` : ''}.` };
   }
+  const from = Math.max(now, hStart);
+  const clash = (await ghl.userEvents(person.ghlUserId, from - HOUR, hEnd))
+    .find((e) => Date.parse(e.startTime) < hEnd && Date.parse(e.endTime) > from);
+  if (clash) return { ok: false, message: `${who} has a call at ${formatTime(Date.parse(clash.startTime), cfg.timezone)} ET during ${hourLabel(hour)}.` };
 
-  if (now > hStart) {
-    const calls = await ghl.userEvents(me.ghlUserId, now, hEnd);
-    const clash = calls.find((e) => Date.parse(e.startTime) < hEnd && Date.parse(e.endTime) > now);
-    if (clash) return { ok: false, message: `You have a call at ${formatTime(Date.parse(clash.startTime), cfg.timezone)} ET during the rest of ${hourLabel(hour)}.` };
-  } else {
-    const [a] = await availability(cfg, ghl, [me], day, [hour]);
-    if (!a.free.has(hour)) return { ok: false, message: `Your GHL calendar isn't free for ${hourLabel(hour)}.` };
-  }
-
-  const row = await assignHour(cfg, ghl, { day, hour, ghlUserId: me.id, source: 'volunteer', team });
-  if (!row) return { ok: false, message: `You're already on call at ${hourLabel(hour)}.` };
-  // Two people clicking at once: keep the first ones up to headcount, undo the rest.
+  const row = await assignHour(cfg, ghl, { day, hour, ghlUserId: person.id, source, team });
+  if (!row) return { ok: false, message: `${who} is already on call at ${hourLabel(hour)}.` };
+  // Two people at once: keep the first ones up to headcount, undo the rest.
   const after = (await coveringNow()).sort((a, b) => Number(a.id) - Number(b.id));
   if (after.findIndex((r) => r.id === row.id) >= headcountFor(cfg, hour)) {
     if (row.block_event_id) await ghl.deleteEvent(row.block_event_id).catch(() => {});
     await store.releaseSlot(row.id);
     return { ok: false, message: `Someone else just took ${hourLabel(hour)}.` };
   }
-
   await refreshRosterMessage(cfg, { slack, team, day });
   await clearCoverMessages(cfg, slack, day);
   await refreshGapBoard(cfg, { slack, team }, day);
-  return { ok: true, message: `You're on call at ${hourLabel(hour)}. It's on your GHL and Google calendar.` };
+  return { ok: true };
 }
 
-// Delete "needs cover" messages for hours that are now fully covered or already over,
-// so the channel only shows hours that still need someone.
-export async function clearCoverMessages(cfg, slack, day) {
-  const byHour = await currentRoster(cfg, day);
-  const hours = await hoursForDay(cfg, day);
-  for (const m of await store.coverMessages(cfg.client, day)) {
-    const full = (byHour.get(m.hour) || []).length >= headcountFor(cfg, m.hour);
-    const over = hourStart(day, m.hour, cfg.timezone) + HOUR <= Date.now();
-    const dropped = !hours.includes(m.hour);
-    if (!full && !over && !dropped) continue;
-    await slack.remove(m.channel, m.ts).catch((e) => { if (e.slackError !== 'message_not_found') throw e; });
-    await store.removeCoverMessage(m.channel, m.ts);
-  }
+export async function volunteerHour(cfg, ctx) {
+  const { slack, team, day, hour, slackUserId } = ctx;
+  const me = await personForSlackUser(team, slack, slackUserId);
+  if (!me) return { ok: false, message: "You're not in the hot-swap pool. Ask your manager to add you." };
+  const r = await takeHour(cfg, ctx, { day, hour, person: me, source: 'volunteer' });
+  return r.ok ? { ok: true, message: `You're on call at ${hourLabel(hour)}. It's on your GHL and Google calendar.` } : r;
 }
 
-// Hourly housekeeping: today's covered/finished requests plus anything left from earlier days.
-export async function sweepCoverMessages(cfg, slack, now = Date.now(), team) {
-  const today = dateKey(now, cfg.timezone);
-  await clearCoverMessages(cfg, slack, today);
-  if (team) await refreshGapBoard(cfg, { slack, team }, today);
-  for (const m of await store.staleCoverMessages(cfg.client, today)) {
-    await slack.remove(m.channel, m.ts).catch(() => {});
-    await store.removeCoverMessage(m.channel, m.ts);
-  }
+// Manager puts someone on call for an hour and lets them know.
+export async function assignHourTo(cfg, ctx, { day, hour, slackUserId, by }) {
+  const person = await personForSlackUser(ctx.team, ctx.slack, slackUserId);
+  if (!person) return { ok: false, message: `<@${slackUserId}> isn't in the hot-swap pool. Add them first with \`/hotswap add\`.` };
+  const r = await takeHour(cfg, ctx, { day, hour, person, source: 'assigned' });
+  if (!r.ok) return r;
+  await ctx.slack.dm(slackUserId, `<@${by}> put you on hot-swap call for *${hourLabel(hour)} ET* on ${formatDay(day)}. It's on your GHL and Google calendar. If a transfer comes in during that hour, claim it.`).catch(() => {});
+  return { ok: true, message: `${person.name} is on call at ${hourLabel(hour)} ET on ${formatDay(day)}. They've been told.` };
 }
 
 export async function openHoursFor(cfg, day) {
@@ -722,8 +708,9 @@ function requestBlocks(cfg, team, req, { onCall, headline, done }) {
   if (onCall) lines.push(onCall);
   const blocks = [{ type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } }];
   if (!done) {
-    blocks.push({ type: 'actions', elements: [
+    blocks.push({ type: 'actions', block_id: `req_${req.id}`, elements: [
       { type: 'button', text: { type: 'plain_text', text: "I've got it" }, style: 'primary', action_id: 'claim', value: String(req.id) },
+      { type: 'users_select', action_id: 'assign_claim', placeholder: { type: 'plain_text', text: 'Manager: assign to…' } },
     ] });
   }
   return { text: `Hot swap: ${req.contact_name} at ${formatTime(start, cfg.timezone)} ET`, blocks };
@@ -786,12 +773,12 @@ async function cancelEscalation(cfg, slack, req) {
   if (fresh?.escalation_msg_id) await slack.unschedule(channel, fresh.escalation_msg_id).catch(() => {});
 }
 
-export async function claimSwap(cfg, { ghl, slack, team, requestId, slackUserId }) {
+export async function claimSwap(cfg, { ghl, slack, team, requestId, slackUserId, assignedBy }) {
   const req = await store.getRequest(requestId);
   if (!req) return { ok: false, message: 'Request not found.' };
   if (req.status !== 'open') return { ok: false, message: 'Already claimed.' };
   const me = await personForSlackUser(team, slack, slackUserId);
-  if (!me) return { ok: false, message: "You're not in the hot-swap pool, so the appointment can't be assigned to you in GHL." };
+  if (!me) return { ok: false, message: assignedBy ? `<@${slackUserId}> isn't in the hot-swap pool. Add them first with \`/hotswap add\`.` : "You're not in the hot-swap pool, so the appointment can't be assigned to you in GHL." };
   if (me.ghlUserId === req.from_ghl_user_id) return { ok: false, message: "That's your own appointment." };
 
   // Don't hand someone a call that overlaps another call they already have.
@@ -816,11 +803,15 @@ export async function claimSwap(cfg, { ghl, slack, team, requestId, slackUserId 
   ].filter(Boolean).join(' ');
 
   const msg = requestBlocks(cfg, team, { ...req, ...won }, {
-    headline: `✅ *Claimed by ${mention(slackUserId, me.name)}*`,
+    headline: `✅ *Claimed by ${mention(slackUserId, me.name)}*${assignedBy ? ` (assigned by <@${assignedBy}>)` : ''}`,
     onCall: `${status} Next: text the prospect your Zoom link from GHL.`,
     done: true,
   });
   await slack.update(req.channel, req.ts, msg.text, msg.blocks);
+  if (assignedBy) {
+    await slack.dm(slackUserId, `<@${assignedBy}> assigned you a hot swap: *${req.contact_name}* at ${formatTime(Date.parse(req.appt_start), cfg.timezone)} ET. ${status} Text the prospect your Zoom link from GHL.`).catch(() => {});
+    return { ok: true, message: `Assigned to ${me.name}. ${status}` };
+  }
   return { ok: true, message: status || 'Claimed.' };
 }
 
