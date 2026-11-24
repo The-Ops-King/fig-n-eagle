@@ -16,9 +16,10 @@ test('plan render: tags people, flags gaps and short hours, tags manager', () =>
   const { text, blocks } = renderRoster(cfg, team, day, byHour, { phase: 'plan', now: hourStart(day, 0, cfg.timezone), hours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] });
   const body = blocks[1].text.text;
   assert.match(text, /^Tomorrow's hot-swap plan/);
-  assert.match(body, /\*8 AM\*: <@UKAD>/);
+  assert.match(body, /\*8 AM\*: \*Kad A\*/); // plan: names only, no tag
+  assert.doesNotMatch(body, /<@UKAD>/);
   assert.match(body, /⚠️ \*9 AM\*: \*NOT COVERED\*/);
-  assert.match(body, /\*2 PM\*: <@UJAKE>  ⚠️ short 1/);
+  assert.match(body, /\*2 PM\*: \*Jake\*  ⚠️ short 1/);
   assert.equal(blocks[3].elements.length, 3);
 });
 
@@ -26,4 +27,10 @@ test('confirm render strikes through hours already over', () => {
   const day = '2026-11-25';
   const { blocks } = renderRoster(cfg, team, day, new Map([[8, [{ ghl_user_id: 'g1' }]]]), { now: hourStart(day, 10, cfg.timezone), hours: [8, 9, 10] });
   assert.match(blocks[1].text.text, /~8 AM: Kad A~/);
+});
+
+test('today roster tags people', () => {
+  const day = '2026-11-25';
+  const { blocks } = renderRoster(cfg, team, day, new Map([[9, [{ ghl_user_id: 'g2' }]]]), { phase: 'confirm', now: hourStart(day, 0, cfg.timezone), hours: [9] });
+  assert.match(blocks[1].text.text, /\*9 AM\*: <@UJAKE>/);
 });

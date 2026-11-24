@@ -226,12 +226,15 @@ async function currentRoster(cfg, day) {
   return byHour;
 }
 
+// Tomorrow's plan shows plain names (no notifications); today's roster tags people. That way each
+// on-call person gets one tag per day, in the morning, and the shift is already on their calendar.
 export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = Date.now(), hours = [] } = {}) {
   const name = (id) => team.byId.get(id);
+  const tag = (id) => (phase === 'plan' ? `*${name(id)?.name || id}*` : mention(name(id)?.slackUserId, name(id)?.name || id));
   const lines = hours.map((h) => {
     const ids = (byHour.get(h) || []).map((r) => r.ghl_user_id ?? r);
     const want = headcountFor(cfg, h);
-    const who = ids.map((id) => mention(name(id)?.slackUserId, name(id)?.name || id)).join(', ');
+    const who = ids.map(tag).join(', ');
     if (hourStart(day, h, cfg.timezone) + HOUR <= now) return `~${hourLabel(h)}: ${ids.map((id) => name(id)?.name || id).join(', ') || '-'}~`;
     if (!ids.length) return `⚠️ *${hourLabel(h)}*: *NOT COVERED*. Tap *Cover an hour* to take it.`;
     if (ids.length < want) return `*${hourLabel(h)}*: ${who}  ⚠️ short ${want - ids.length}`;
