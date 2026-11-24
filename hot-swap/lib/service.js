@@ -725,12 +725,36 @@ export async function createSwapRequest(cfg, { ghl, slack, team, appointmentId, 
       headline: `⏰ *Unclaimed after ${cfg.claim?.escalateAfterMinutes ?? 3} min.* Anyone free?`,
       onCall: allMentions,
     });
+    esc.text = `${escalationMarker(req.id)} still unclaimed: ${esc.text}`;
     const sched = await slack.schedule(cfg.slack.channelId, Math.floor((Date.now() + escalateMs) / 1000), esc.text, esc.blocks,
       { thread_ts: posted.ts, reply_broadcast: true });
     escalationId = sched.scheduled_message_id;
   }
   await store.setRequestMessage(req.id, posted.channel, posted.ts, escalationId);
+  // Claimed while we were scheduling? Cancel the alert ourselves.
+  if (escalationId && (await store.getRequest(req.id))?.status !== 'open') {
+    await slack.unschedule(cfg.slack.channelId, escalationId).catch(() => {});
+  }
   return { ok: true, message: 'Posted. Stay on your current call. Someone will claim it.' };
+}
+
+const escalationMarker = (id) => `Hot swap #${id}`;
+
+// Cancel the pending "unclaimed" alert. Uses the saved ID, and also scans the channel's scheduled
+// messages for this request's marker, so it works even if the claim lands before the ID was saved.
+async function cancelEscalation(cfg, slack, req) {
+  const channel = req.channel || cfg.slack.channelId;
+  const fresh = await store.getRequest(req.id);
+  const ids = new Set([req.escalation_msg_id, fresh?.escalation_msg_id].filter(Boolean));
+  try {
+    const marker = `${escalationMarker(req.id)} still unclaimed`;
+    for (const m of await slack.scheduledIn(cfg.slack.channelId)) if ((m.text || '').startsWith(marker)) ids.add(m.id);
+  } catch (e) { console.error('list scheduled failed', e.message); }
+  for (const id of ids) {
+    await slack.unschedule(channel, id).catch((e) => {
+      if (!['invalid_scheduled_message_id'].includes(e.slackError)) console.error('unschedule failed', e.slackError || e.message);
+    });
+  }
 }
 
 export async function claimSwap(cfg, { ghl, slack, team, requestId, slackUserId }) {
@@ -751,7 +775,7 @@ export async function claimSwap(cfg, { ghl, slack, team, requestId, slackUserId 
   const won = await store.claimRequest(req.id, me.ghlUserId, slackUserId);
   if (!won) return { ok: false, message: 'Someone else just claimed it.' };
 
-  if (req.escalation_msg_id) await slack.unschedule(req.channel, req.escalation_msg_id).catch(() => {});
+  await cancelEscalation(cfg, slack, req);
 
   // Credit moves via the deal owner + contact owner. The appointment itself is left alone:
   // GHL only allows calendar team members as appointment owners, and A/B teams stay as they are.
