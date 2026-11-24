@@ -13,10 +13,12 @@ export function baseContext() {
   return { cfg, ghl: ghlClient(cfg), slack: slackClient() };
 }
 
+export function resetTeamCache() { teamCache = null; }
+
 // Full context including the Slack <-> GHL people mapping (needs Slack API calls).
 export async function context(base = baseContext()) {
   if (!teamCache || teamCache.client !== base.cfg.client || Date.now() - teamCache.at > TEAM_TTL_MS) {
-    teamCache = { client: base.cfg.client, at: Date.now(), team: await resolvePeople(base.cfg, base.slack) };
+    teamCache = { client: base.cfg.client, at: Date.now(), team: await resolvePeople(base.cfg, base.slack, base.ghl) };
   }
   return { ...base, team: teamCache.team };
 }

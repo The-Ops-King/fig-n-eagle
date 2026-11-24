@@ -99,3 +99,21 @@ export async function getRequest(id) {
   const rows = await db()`SELECT * FROM swap_requests WHERE id = ${id}`;
   return rows[0] || null;
 }
+
+export async function poolOverrides(client) {
+  return db()`SELECT * FROM pool_overrides WHERE client = ${client}`;
+}
+
+export async function setPoolOverride({ client, ghlUserId, action, name, email, slackUserId, changedBy }) {
+  await db()`
+    INSERT INTO pool_overrides (client, ghl_user_id, action, name, email, slack_user_id, changed_by)
+    VALUES (${client}, ${ghlUserId}, ${action}, ${name}, ${email}, ${slackUserId}, ${changedBy})
+    ON CONFLICT (client, ghl_user_id) DO UPDATE
+      SET action = EXCLUDED.action, name = EXCLUDED.name, email = EXCLUDED.email,
+          slack_user_id = EXCLUDED.slack_user_id, changed_by = EXCLUDED.changed_by, changed_at = now()`;
+}
+
+export async function futureSlotsFor(client, ghlUserId, fromDay) {
+  return db()`SELECT * FROM roster_slots WHERE client = ${client} AND ghl_user_id = ${ghlUserId}
+              AND status = 'active' AND day >= ${fromDay} ORDER BY day, hour`;
+}

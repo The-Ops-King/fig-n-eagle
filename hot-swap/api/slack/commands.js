@@ -1,11 +1,13 @@
 // Slash command.
 //   /hotswap          open the request modal (anyone)
-//   /hotswap roster   build/refresh TODAY's roster now (manager only)
-//   /hotswap plan     build TOMORROW's plan now (manager only)
+//   /hotswap today      build/refresh TODAY's roster now (manager only; alias: roster)
+//   /hotswap tomorrow   build/refresh TOMORROW's plan now (manager only; alias: plan)
+//   /hotswap add @name | remove @name   change the pool (manager only)
+//   /hotswap pool       list who's in the pool
 // Request URL: https://<deployment>/api/slack/commands
 import { waitUntil } from '@vercel/functions';
 import { verifySlackSignature } from '../../lib/slack.js';
-import { baseContext, context } from '../../lib/context.js';
+import { baseContext, context, resetTeamCache } from '../../lib/context.js';
 import { dateKey, nextDateKey, formatDay } from '../../lib/time.js';
 import * as svc from '../../lib/service.js';
 import { loadingView, messageView, requestView } from '../../lib/views.js';
@@ -31,14 +33,16 @@ export async function POST(request) {
   if (!ok) return new Response('invalid signature', { status: 401 });
 
   const form = new URLSearchParams(rawBody);
-  const sub = (form.get('text') || '').trim().toLowerCase();
+  const text = (form.get('text') || '').trim();
+  const raw = text.split(/\s+/)[0].toLowerCase();
+  const sub = { roster: 'today', plan: 'tomorrow' }[raw] || raw;
   const user = form.get('user_id');
   const base = baseContext();
 
-  if (sub === 'roster' || sub === 'plan') {
+  if (sub === 'today' || sub === 'tomorrow') {
     const today = dateKey(Date.now(), base.cfg.timezone);
-    const day = sub === 'plan' ? nextDateKey(today) : today;
-    const phase = sub === 'plan' ? 'plan' : 'confirm';
+    const day = sub === 'tomorrow' ? nextDateKey(today) : today;
+    const phase = sub === 'tomorrow' ? 'plan' : 'confirm';
     const responseUrl = form.get('response_url');
     waitUntil(context(base).then(async (ctx) => {
       if (ctx.team.manager.slackUserId !== user) {
@@ -49,11 +53,28 @@ export async function POST(request) {
       const errs = r.errors.length ? `\nProblems: ${r.errors.join('; ')}` : '';
       return followUp(responseUrl, `Updated the ${phase === 'plan' ? 'plan' : 'roster'} for ${formatDay(day)}. ${gaps}${errs}`);
     }).catch((e) => { console.error(e); return followUp(responseUrl, `Something went wrong: ${e.message}`); }));
-    return ephemeral(`Building the ${sub === 'plan' ? "plan for tomorrow" : "roster for today"}…`);
+    return ephemeral(`Building ${sub === 'tomorrow' ? "tomorrow's plan" : "today's roster"}…`);
+  }
+
+  if (sub === 'add' || sub === 'remove' || sub === 'pool') {
+    const responseUrl = form.get('response_url');
+    // Needs "Escape channels, users, and links" on the slash command so @name arrives as <@U123|name>.
+    const target = text.match(/<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/)?.[1];
+    waitUntil(context(base).then(async (ctx) => {
+      if (sub === 'pool') return followUp(responseUrl, svc.describePool(ctx.team));
+      if (ctx.team.manager.slackUserId !== user) return followUp(responseUrl, `Only ${ctx.team.manager.name} can change the pool.`);
+      if (!target) return followUp(responseUrl, `Usage: \`/hotswap ${sub} @name\` (pick the person from the @ menu).`);
+      const r = sub === 'add'
+        ? await svc.addToPool(base.cfg, ctx, { slackUserId: target, by: user })
+        : await svc.removeFromPool(base.cfg, ctx, { slackUserId: target, by: user });
+      resetTeamCache();
+      return followUp(responseUrl, r.message);
+    }).catch((e) => { console.error(e); return followUp(responseUrl, `Something went wrong: ${e.message}`); }));
+    return ephemeral('Working on it…');
   }
 
   if (sub && sub !== 'request') {
-    return ephemeral('Usage: `/hotswap` to request a hot swap. Managers: `/hotswap roster` (today) or `/hotswap plan` (tomorrow).');
+    return ephemeral('Usage: `/hotswap` request a hot swap · `/hotswap pool` see who is in the pool. Managers: `/hotswap today`, `/hotswap tomorrow`, `/hotswap add @name`, `/hotswap remove @name`.');
   }
 
   const title = 'Request a hot swap';

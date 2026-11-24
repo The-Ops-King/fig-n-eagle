@@ -1,5 +1,5 @@
 // Orchestration: GHL + Slack + DB. Each exported function is one user-visible action.
-import { activePool, coverageHours, headcountFor } from './config.js';
+import { coverageHours, headcountFor } from './config.js';
 import { slotsToIntervals, freeHours } from './availability.js';
 import { planRoster } from './roster.js';
 import { HOUR, dateKey, nextDateKey, hourStart, hourLabel, formatDay, formatTime, weekdayOf } from './time.js';
@@ -8,11 +8,39 @@ import * as store from './db.js';
 
 // ---------- people ----------
 
-export async function resolvePeople(cfg, slack) {
-  const people = await Promise.all(activePool(cfg).map(async (p) => ({
+// The pool, straight from GHL: every active calendar in the closers' calendar group is one
+// closer (its owner), using that calendar for availability. Adding a closer's calendar to the
+// group during onboarding is all it takes. `include` adds setters/others; `exclude` removes.
+export async function poolFromGhl(cfg, ghl, overrides = []) {
+  const pool = cfg.pool;
+  const byId = new Map();
+  if (pool.closerCalendarGroupId) {
+    for (const cal of await ghl.calendarsInGroup(pool.closerCalendarGroupId)) {
+      const owner = (cal.teamMembers || [])[0]?.userId;
+      if (!owner || (cal.teamMembers || []).length !== 1 || byId.has(owner)) continue;
+      const u = await ghl.user(owner);
+      if (!u || u.deleted) continue;
+      byId.set(owner, { name: u.name || [u.firstName, u.lastName].filter(Boolean).join(' '), ghlUserId: owner, email: (u.email || '').toLowerCase(), role: 'closer', availabilityCalendarId: cal.id });
+    }
+  }
+  for (const p of pool.include || []) byId.set(p.ghlUserId, { role: 'setter', ...p });
+  for (const id of pool.exclude || []) byId.delete(id);
+  // Slack-made changes (/hotswap add|remove) win over the group and config.
+  for (const o of overrides) {
+    if (o.action === 'remove') byId.delete(o.ghl_user_id);
+    else if (o.action === 'add' && !byId.has(o.ghl_user_id)) {
+      byId.set(o.ghl_user_id, { name: o.name, ghlUserId: o.ghl_user_id, email: o.email, role: 'added', slackUserId: o.slack_user_id, availabilityCalendarId: null });
+    }
+  }
+  return [...byId.values()].map((p) => ({ ...p, id: p.ghlUserId }));
+}
+
+export async function resolvePeople(cfg, slack, ghl) {
+  const slackIds = cfg.pool.slackUserIds || {};
+  const overrides = await store.poolOverrides(cfg.client).catch((e) => { console.error('pool overrides', e.message); return []; });
+  const people = await Promise.all((await poolFromGhl(cfg, ghl, overrides)).map(async (p) => ({
     ...p,
-    id: p.ghlUserId,
-    slackUserId: p.slackUserId || (await slack.userIdByEmail(p.email)),
+    slackUserId: slackIds[p.ghlUserId] || p.slackUserId || (await slack.userIdByEmail(p.email)),
   })));
   const m = cfg.slack.manager || {};
   const manager = { ...m, slackUserId: m.slackUserId || (await slack.userIdByEmail(m.email)) };
@@ -50,6 +78,14 @@ export async function availability(cfg, ghl, people, day, hours) {
 
   return mapLimit(people, 4, async (p) => {
     try {
+      if (!p.availabilityCalendarId) {
+        // Added from Slack with no personal calendar: treat as available all coverage hours
+        // except where they already have an appointment.
+        const events = await ghl.userEvents(p.ghlUserId, dayStart, dayEnd);
+        const busy = (ms) => events.some((e) => Date.parse(e.startTime) < ms + HOUR && Date.parse(e.endTime) > ms);
+        const free = new Set([...starts].filter(([ms]) => !busy(ms) && ms + HOUR > Date.now()).map(([, h]) => h));
+        return { ...p, free, load: events.length };
+      }
       const cal = await ghl.calendar(p.availabilityCalendarId);
       const slots = await ghl.freeSlots(p.availabilityCalendarId, p.ghlUserId, windowStart, windowEnd, tz);
       const intervals = slotsToIntervals(slots, cal.slotDuration || 60, cal.slotInterval || cal.slotDuration || 60);
@@ -158,7 +194,17 @@ export function renderRoster(cfg, team, day, byHour, { phase = 'confirm', now = 
 // fresh=true (scheduled runs): always post a new message. fresh=false (manual re-run):
 // edit today's existing message in place if there is one.
 export async function publishRoster(cfg, { ghl, slack, team, day, phase, fresh = true }) {
+  const sync = await ghl.setCalendarTeam(cfg.ghl.onCall.calendarId, team.people.map((p) => p.ghlUserId))
+    .catch((e) => ({ error: e.message }));
   const result = await buildRoster(cfg, { ghl, team, day, apply: true });
+  if (sync.error) result.errors.push(`Couldn't update the Hot Swap On-Call calendar team: ${sync.error}`);
+  if (sync.added?.length || sync.removed?.length) {
+    const nm = (id) => team.byId.get(id)?.name || id;
+    result.notes = [
+      ...(sync.added?.length ? [`Added to the pool: ${sync.added.map(nm).join(', ')}`] : []),
+      ...(sync.removed?.length ? [`Removed from the Hot Swap On-Call calendar: ${sync.removed.length} user(s) no longer in the pool`] : []),
+    ];
+  }
   const byHour = await currentRoster(cfg, day);
   const msg = renderRoster(cfg, team, day, byHour, { phase });
   const prev = fresh ? null : await store.getRosterPost(cfg.client, day);
@@ -175,6 +221,7 @@ export async function publishRoster(cfg, { ghl, slack, team, day, phase, fresh =
     const parts = [result.gaps.length
       ? `${label}: *${result.gaps.length} hour(s) without enough cover.*\n${gapLines.join('\n')}\nAnyone in the pool can take an open hour with *Cover an hour* on the roster.`
       : `${label}: every hour is covered. ✅`];
+    if (result.notes?.length) parts.push(result.notes.join('\n'));
     if (result.errors.length) parts.push(`Problems:\n• ${result.errors.join('\n• ')}`);
     await slack.dm(team.manager.slackUserId, parts.join('\n\n'));
   }
@@ -273,6 +320,44 @@ export async function myFutureSlots(cfg, team, day, slackUserId) {
     return (p?.slackUserId === slackUserId || isManager(team, slackUserId))
       && hourStart(day, r.hour, cfg.timezone) + HOUR > Date.now();
   });
+}
+
+// ---------- pool management from Slack ----------
+
+async function ghlUserForSlack(cfg, { ghl, slack }, slackUserId) {
+  const email = await slack.emailByUserId(slackUserId).catch(() => null);
+  const mapped = Object.entries(cfg.pool.slackUserIds || {}).find(([, s]) => s === slackUserId)?.[0];
+  const u = mapped ? await ghl.user(mapped) : await ghl.userByEmail(email);
+  return u ? { ghlUserId: u.id, name: u.name || [u.firstName, u.lastName].filter(Boolean).join(' '), email: (u.email || email || '').toLowerCase() } : null;
+}
+
+export async function addToPool(cfg, ctx, { slackUserId, by }) {
+  const u = await ghlUserForSlack(cfg, ctx, slackUserId);
+  if (!u) return { ok: false, message: `<@${slackUserId}> doesn't match a GHL user by email. Their Slack and GHL emails must match (or add them to pool.slackUserIds in the config).` };
+  await store.setPoolOverride({ client: cfg.client, ghlUserId: u.ghlUserId, action: 'add', name: u.name, email: u.email, slackUserId, changedBy: by });
+  await ctx.ghl.setCalendarTeam(cfg.ghl.onCall.calendarId, [...new Set([...ctx.team.people.map((p) => p.ghlUserId), u.ghlUserId])]);
+  return { ok: true, message: `Added <@${slackUserId}> (${u.name}) to the hot-swap pool. They'll be included from the next roster run.` };
+}
+
+export async function removeFromPool(cfg, ctx, { slackUserId, by }) {
+  const u = await ghlUserForSlack(cfg, ctx, slackUserId);
+  if (!u) return { ok: false, message: `<@${slackUserId}> doesn't match a GHL user by email.` };
+  await store.setPoolOverride({ client: cfg.client, ghlUserId: u.ghlUserId, action: 'remove', name: u.name, email: u.email, slackUserId, changedBy: by });
+  // Free their remaining on-call hours so they show as NOT COVERED with a cover button.
+  const today = dateKey(Date.now(), cfg.timezone);
+  const freed = [];
+  for (const slot of await store.futureSlotsFor(cfg.client, u.ghlUserId, today)) {
+    const day = typeof slot.day === 'string' ? slot.day.slice(0, 10) : dateKey(new Date(slot.day).getTime() + 12 * HOUR, 'UTC');
+    if (hourStart(day, slot.hour, cfg.timezone) + HOUR <= Date.now()) continue;
+    const r = await releaseHour(cfg, { ...ctx, day, slotId: slot.id, slackUserId: by });
+    if (r.ok) freed.push(`${formatDay(day)} ${hourLabel(slot.hour)}`);
+  }
+  return { ok: true, message: `Removed <@${slackUserId}> (${u.name}) from the hot-swap pool.${freed.length ? ` Freed their hours: ${freed.join(', ')}.` : ''}` };
+}
+
+export function describePool(team) {
+  const lines = team.people.map((p) => `• ${p.slackUserId ? `<@${p.slackUserId}>` : p.name} (${p.role}${p.availabilityCalendarId ? '' : ', no calendar'})`);
+  return `Hot-swap pool (${team.people.length}):\n${lines.join('\n')}`;
 }
 
 // ---------- hot swap requests ----------

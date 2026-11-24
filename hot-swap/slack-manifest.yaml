@@ -17,7 +17,8 @@ features:
     - command: /hotswap
       url: https://YOUR-DEPLOYMENT/api/slack/commands
       description: Request a hot swap for one of your upcoming calls
-      should_escape: false
+      usage_hint: "[today | tomorrow | pool | add @name | remove @name]"
+      should_escape: true
 oauth_config:
   scopes:
     bot:

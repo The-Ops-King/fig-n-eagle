@@ -15,6 +15,8 @@ export function ghlClient(cfg, { fetchImpl = fetch, token = process.env[cfg.ghl.
   if (!token) throw new Error(`Missing env ${cfg.ghl.tokenEnv}`);
   const locationId = cfg.ghl.locationId;
   const calCache = new Map();
+  const userCache = new Map();
+  let usersList = null;
 
   async function call(path, { method = 'GET', body, version = CAL_VERSION } = {}) {
     for (let attempt = 0; ; attempt++) {
@@ -87,6 +89,38 @@ export function ghlClient(cfg, { fetchImpl = fetch, token = process.env[cfg.ghl.
         },
       });
       return res.id || res.appointment?.id;
+    },
+
+    // Active calendars in a calendar group (e.g. each closer's personal calendar).
+    async calendarsInGroup(groupId) {
+      const q = new URLSearchParams({ locationId, groupId });
+      const { calendars = [] } = await call(`/calendars/?${q}`);
+      return calendars.filter((c) => c.groupId === groupId && c.isActive !== false);
+    },
+
+    async userByEmail(email) {
+      if (!email) return null;
+      if (!usersList) usersList = call(`/users/?${new URLSearchParams({ locationId })}`, { version: CONTACT_VERSION }).then((r) => r.users || []);
+      return (await usersList).find((u) => (u.email || '').toLowerCase() === email.toLowerCase() && !u.deleted) || null;
+    },
+
+    async user(userId) {
+      if (!userCache.has(userId)) userCache.set(userId, call(`/users/${userId}`, { version: CONTACT_VERSION }).catch(() => null));
+      return userCache.get(userId);
+    },
+
+    // Make a calendar's team exactly `userIds`. Keeps existing members' settings.
+    async setCalendarTeam(calendarId, userIds) {
+      const { calendar } = await call(`/calendars/${calendarId}`);
+      const current = calendar.teamMembers || [];
+      const want = new Set(userIds);
+      const same = current.length === want.size && current.every((m) => want.has(m.userId));
+      if (same) return { changed: false };
+      const kept = current.filter((m) => want.has(m.userId)).map((m) => ({ userId: m.userId, priority: m.priority ?? 0.5 }));
+      const added = [...want].filter((id) => !current.some((m) => m.userId === id)).map((id) => ({ userId: id, priority: 0.5 }));
+      await call(`/calendars/${calendarId}`, { method: 'PUT', body: { teamMembers: [...kept, ...added] } });
+      calCache.delete(calendarId);
+      return { changed: true, added: added.map((m) => m.userId), removed: current.filter((m) => !want.has(m.userId)).map((m) => m.userId) };
     },
 
     async blockedSlots(userId, startMs, endMs) {

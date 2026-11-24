@@ -21,17 +21,15 @@ function validate(cfg) {
   need(cfg.ghl?.locationId && cfg.ghl?.tokenEnv, 'ghl.locationId and ghl.tokenEnv required');
   const c = cfg.coverage;
   need(c && Number.isInteger(c.firstHour) && Number.isInteger(c.lastHour) && c.firstHour <= c.lastHour, 'coverage.firstHour/lastHour invalid');
-  need(Array.isArray(cfg.pool) && cfg.pool.length, 'pool must not be empty');
+  const pool = cfg.pool;
+  need(pool && typeof pool === 'object' && !Array.isArray(pool), 'pool must be an object');
+  need(pool.closerCalendarGroupId || pool.include?.length, 'pool needs closerCalendarGroupId or include entries');
   const ids = new Set();
-  for (const p of cfg.pool) {
-    need(p.ghlUserId && p.availabilityCalendarId && p.name, `pool entry incomplete: ${JSON.stringify(p)}`);
+  for (const p of pool.include || []) {
+    need(p.ghlUserId && p.availabilityCalendarId && p.name, `pool.include entry incomplete: ${JSON.stringify(p)}`);
     need(!ids.has(p.ghlUserId), `duplicate ghlUserId ${p.ghlUserId}`);
     ids.add(p.ghlUserId);
   }
-}
-
-export function activePool(cfg) {
-  return cfg.pool.filter((p) => p.active !== false);
 }
 
 export function headcountFor(cfg, hour) {

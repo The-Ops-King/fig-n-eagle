@@ -50,3 +50,16 @@ CREATE TABLE IF NOT EXISTS swap_requests (
 -- One open request per appointment.
 CREATE UNIQUE INDEX IF NOT EXISTS swap_requests_open_uniq
   ON swap_requests (client, appointment_id) WHERE status = 'open';
+
+-- Manager changes to the pool made from Slack (/hotswap add|remove).
+CREATE TABLE IF NOT EXISTS pool_overrides (
+  client       TEXT        NOT NULL,
+  ghl_user_id  TEXT        NOT NULL,
+  action       TEXT        NOT NULL,   -- add | remove
+  name         TEXT,
+  email        TEXT,
+  slack_user_id TEXT,
+  changed_by   TEXT,
+  changed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (client, ghl_user_id)
+);

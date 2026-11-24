@@ -47,24 +47,27 @@
     "escalateAfterMinutes": 3
   },
   "blockTitle": "Hot Swap On-Call (TEST)",
-  "pool": [
-    {
-      "name": "J Tyler Ray",
-      "ghlUserId": "0P99eWr8BKMRUjWmYYlZ",
-      "email": "jtyler@catalyst.surf",
-      "role": "closer",
-      "availabilityCalendarId": "t3MGzAKMpNBBJbme1A6o",
-      "active": true,
-      "slackUserId": "U0CCS9JKRCK"
-    },
-    {
-      "name": "Khaled",
-      "ghlUserId": "JJKPzzh2rYrFaHenMW1q",
-      "email": "khaled@catalyst.surf",
-      "role": "closer",
-      "availabilityCalendarId": "lVXHHQBMiVkwgO5L4zXW",
-      "active": true,
-      "slackUserId": "U0A834ENM3L"
-    }
-  ]
+  "pool": {
+    "closerCalendarGroupId": null,
+    "include": [
+      {
+        "name": "J Tyler Ray",
+        "ghlUserId": "0P99eWr8BKMRUjWmYYlZ",
+        "email": "jtyler@catalyst.surf",
+        "role": "closer",
+        "availabilityCalendarId": "t3MGzAKMpNBBJbme1A6o",
+        "slackUserId": "U0CCS9JKRCK"
+      },
+      {
+        "name": "Khaled",
+        "ghlUserId": "JJKPzzh2rYrFaHenMW1q",
+        "email": "khaled@catalyst.surf",
+        "role": "closer",
+        "availabilityCalendarId": "lVXHHQBMiVkwgO5L4zXW",
+        "slackUserId": "U0A834ENM3L"
+      }
+    ],
+    "exclude": [],
+    "slackUserIds": {}
+  }
 }

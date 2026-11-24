@@ -32,7 +32,7 @@ slack-manifest.yaml        Slack app definition
 ## Setup (one time)
 1. **Vercel project**: import this repo, set **Root Directory = `hot-swap`**.
 2. **Database**: Vercel → Storage → add **Neon Postgres** to the project (sets `DATABASE_URL`). Tables are created automatically on first use.
-3. **GHL token**: in the sub-account, Settings → Private Integrations → new token with `calendars.readonly`, `calendars/events.readonly`, `calendars/events.write`, `contacts.readonly`, `users.readonly`. Use a dedicated token for this app.
+3. **GHL token**: in the sub-account, Settings → Private Integrations → new token with `calendars.readonly`, `calendars.write`, `calendars/events.readonly`, `calendars/events.write`, `contacts.readonly`, `users.readonly`. Use a dedicated token for this app.
 4. **Slack app**: api.slack.com/apps → Create New App → From manifest → paste `slack-manifest.yaml` with your Vercel domain in place of `YOUR-DEPLOYMENT`. Install to the workspace. Invite the bot to the hot-transfer channel (`/invite @Hot Swap`).
 5. **Env vars** (Vercel → Settings → Environment Variables), see `.env.example`:
    `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `CRON_SECRET`, `GHL_PIT_FIG_N_EAGLE`, `HOT_SWAP_CLIENT=fig-n-eagle`.
@@ -40,10 +40,24 @@ slack-manifest.yaml        Slack app definition
 7. Deploy. The database tables are created automatically on first use. To run the roster now instead of waiting for the schedule, the manager types `/hotswap roster` (today) or `/hotswap plan` (tomorrow) in Slack.
 
 ## The "Hot Swap On-Call" GHL calendar
-On-call shifts are appointments on a dedicated GHL calendar (`ghl.onCall.calendarId`), booked against an internal contact (`ghl.onCall.contactId`, "Hot Swap On-Call"), with notifications off. Open that calendar in GHL to see everyone's shifts. It isn't in any calendar group, so workflows filtered to specific calendars or groups don't fire. **When you add someone to `pool`, also add them as a team member on that calendar**, or GHL will reject their shifts.
+On-call shifts are appointments on a dedicated GHL calendar (`ghl.onCall.calendarId`), booked against an internal contact (`ghl.onCall.contactId`, "Hot Swap On-Call"), with notifications off. Open that calendar in GHL to see everyone's shifts. It isn't in any calendar group, so workflows filtered to specific calendars or groups don't fire. The app adds and removes team members on it automatically to match the pool.
+
+## Who's in the pool
+- **Closers, automatically:** every active calendar in the GHL calendar group `pool.closerCalendarGroupId` (Fig & Eagle: *Family Clarity Calls*) is one closer, and their availability is read from that calendar. Onboarding a closer = creating their calendar in that group, which you already do. Deactivating or removing it takes them out.
+- **From Slack (manager only):** `/hotswap add @name` adds anyone (e.g. a setter); `/hotswap remove @name` takes someone out and frees their remaining hours. People added without a personal calendar count as available for all coverage hours except where they have appointments. `/hotswap pool` lists everyone.
+- The app keeps the Hot Swap On-Call calendar's team in sync with the pool on every roster run.
+- Slack is matched to GHL by email. If someone's emails differ, map them in `pool.slackUserIds` (`{ "ghlUserId": "SlackUserId" }`).
+
+## Slash commands
+| Command | Who | What |
+|---|---|---|
+| `/hotswap` | anyone | request a hot swap for one of your upcoming calls |
+| `/hotswap pool` | anyone | list the pool |
+| `/hotswap today` / `/hotswap tomorrow` | manager | build or refresh the roster now (edits the existing message) |
+| `/hotswap add @name` / `/hotswap remove @name` | manager | change the pool |
 
 ## Day-to-day config (`config/<client>.json`)
-- `pool`: who can be on call. Add setters with `"role": "setter"` and their own GHL calendar as `availabilityCalendarId`. Set `"active": false` to pause someone.
+- `pool.include` / `pool.exclude`: permanent additions/removals in code (Slack commands are usually easier).
 - `coverage.firstHour` / `lastHour`: local hours (8 → 20 means 8 AM through the 8 PM hour, i.e. 8 AM ET to 5 PM PT).
 - `coverage.days`: 0 = Sunday … 6 = Saturday.
 - `coverage.headcount`: people per hour (`byHour` overrides `default`).
