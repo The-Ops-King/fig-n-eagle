@@ -50,7 +50,8 @@ export async function POST(request) {
   if (payload.type === 'block_actions') {
     const action = payload.actions[0];
     const day = /^\d{4}-\d{2}-\d{2}$/.test(action.value || '') ? action.value : today;
-    switch (action.action_id) {
+    const actionId = action.action_id.startsWith('cover_hour') ? 'cover_hour' : action.action_id;
+    switch (actionId) {
       case 'request_open':
         return openModal('Request a hot swap', async (ctx) =>
           requestView(cfg, await svc.handoffCandidates(cfg, { ...ctx, slackUserId: user })));

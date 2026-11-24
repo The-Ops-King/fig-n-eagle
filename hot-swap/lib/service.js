@@ -283,12 +283,12 @@ export async function publishRoster(cfg, { ghl, slack, team, day, phase, fresh =
     await store.saveRosterPost(cfg.client, day, cfg.slack.channelId, ts);
   }
 
-  if (team.manager.slackUserId && result.hours.length) {
-    const label = phase === 'plan' ? `Tomorrow's hot-swap plan (${formatDay(day)})` : `Today's hot-swap roster (${formatDay(day)})`;
-    const gapLines = result.gaps.map((g) => `• ${hourLabel(g.hour)} ET: need ${g.missing} more`);
-    const parts = [result.gaps.length
-      ? `${label}: *${result.gaps.length} hour(s) without enough cover.*\n${gapLines.join('\n')}\nAnyone in the pool can take an open hour with *Cover an hour* on the roster.`
-      : `${label}: every hour is covered. ✅`];
+  // Open hours go to the whole pool first; the manager only hears about what's left later.
+  await refreshGapBoard(cfg, { slack, team }, day, { post: true }).catch((e) => result.errors.push(`Gap board: ${e.message}`));
+  if (phase === 'confirm') await escalateGaps(cfg, { slack, team }, day);
+
+  if (team.manager.slackUserId && (result.notes?.length || result.errors.length)) {
+    const parts = [`Hot-swap roster for ${formatDay(day)}:`];
     if (result.notes?.length) parts.push(result.notes.join('\n'));
     if (result.errors.length) parts.push(`Problems:\n• ${result.errors.join('\n• ')}`);
     await slack.dm(team.manager.slackUserId, parts.join('\n\n'));
@@ -389,6 +389,7 @@ export async function volunteerHour(cfg, { ghl, slack, team, day, hour, slackUse
 
   await refreshRosterMessage(cfg, { slack, team, day });
   await clearCoverMessages(cfg, slack, day);
+  await refreshGapBoard(cfg, { slack, team }, day);
   return { ok: true, message: `You're on call at ${hourLabel(hour)}. It's on your GHL and Google calendar.` };
 }
 
@@ -408,9 +409,10 @@ export async function clearCoverMessages(cfg, slack, day) {
 }
 
 // Hourly housekeeping: today's covered/finished requests plus anything left from earlier days.
-export async function sweepCoverMessages(cfg, slack, now = Date.now()) {
+export async function sweepCoverMessages(cfg, slack, now = Date.now(), team) {
   const today = dateKey(now, cfg.timezone);
   await clearCoverMessages(cfg, slack, today);
+  if (team) await refreshGapBoard(cfg, { slack, team }, today);
   for (const m of await store.staleCoverMessages(cfg.client, today)) {
     await slack.remove(m.channel, m.ts).catch(() => {});
     await store.removeCoverMessage(m.channel, m.ts);
@@ -437,6 +439,131 @@ export async function myFutureSlots(cfg, team, day, slackUserId) {
     return (p?.slackUserId === slackUserId || isManager(team, slackUserId))
       && hourStart(day, r.hour, cfg.timezone) + HOUR > Date.now();
   });
+}
+
+// ---------- gap board ----------
+
+// One message per day listing hours that still need people, with an "I'll cover" button per hour.
+// It tags the pool once, when first posted; after that it's only edited (edits don't notify),
+// so the pool gets at most one tag per day, and only on days with gaps.
+// Deleted when nothing is open.
+export async function refreshGapBoard(cfg, { slack, team }, day, { post = false } = {}) {
+  const open = await coverableHours(cfg, day);
+  const board = await store.getGapBoard(cfg.client, day);
+  if (!open.length) {
+    if (board) {
+      await slack.remove(board.channel, board.ts).catch((e) => { if (e.slackError !== 'message_not_found') throw e; });
+      await store.deleteGapBoard(cfg.client, day);
+    }
+    return;
+  }
+  const today = dateKey(Date.now(), cfg.timezone);
+  const when = day === today ? `Today (${formatDay(day)})` : day === nextDateKey(today) ? `Tomorrow (${formatDay(day)})` : formatDay(day);
+  const tags = team.people.filter((p) => p.slackUserId).map((p) => `<@${p.slackUserId}>`).join(' ');
+  const list = open.map((h) => `${hourLabel(h.hour)} ET${h.need > 1 ? ` (needs ${h.need})` : ''}`).join(', ');
+  const text = `⚠️ *${when} still needs hot-swap cover:* ${list}\nCan you take one? ${tags}`;
+  const buttons = open.slice(0, 25).map((h) => ({
+    type: 'button', text: { type: 'plain_text', text: `I'll cover ${hourLabel(h.hour)}` }, action_id: `cover_hour_${h.hour}`, value: `${day}|${h.hour}`,
+  }));
+  const blocks = [{ type: 'section', text: { type: 'mrkdwn', text } }];
+  for (let i = 0; i < buttons.length; i += 5) blocks.push({ type: 'actions', elements: buttons.slice(i, i + 5) });
+  if (board) {
+    await slack.update(board.channel, board.ts, text, blocks);
+  } else if (post) {
+    const posted = await slack.post(cfg.slack.channelId, text, blocks);
+    await store.saveGapBoard(cfg.client, day, posted.channel, posted.ts);
+  }
+}
+
+// Tell the manager about hours nobody has taken. Silent when everything is covered.
+export async function escalateGaps(cfg, { slack, team }, day) {
+  if (!team.manager.slackUserId) return;
+  const open = await coverableHours(cfg, day);
+  if (!open.length) return;
+  const today = dateKey(Date.now(), cfg.timezone);
+  const when = day === today ? 'today' : 'tomorrow';
+  const list = open.map((h) => `• ${hourLabel(h.hour)} ET${h.need > 1 ? ` (needs ${h.need})` : ''}`).join('\n');
+  await slack.dm(team.manager.slackUserId,
+    `Nobody has picked up these hot-swap hours for ${when} (${formatDay(day)}):\n${list}\nThe pool was already tagged. You may need to line someone up.`);
+}
+
+// ---------- insights ----------
+
+const median = (xs) => {
+  if (!xs.length) return null;
+  const a = [...xs].sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+};
+const mins = (ms) => (ms == null ? '-' : ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${(ms / 60_000).toFixed(1)} min`);
+const asDay = (d) => (typeof d === 'string' ? d.slice(0, 10) : new Date(d).toISOString().slice(0, 10));
+
+export async function insights(cfg, team, days = 7, now = Date.now()) {
+  const today = dateKey(now, cfg.timezone);
+  let from = today;
+  for (let i = 1; i < days; i++) {
+    const [y, m, d] = from.split('-').map(Number);
+    from = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+  }
+  const since = hourStart(from, 0, cfg.timezone);
+  const name = (id) => team.byId.get(id)?.name || 'someone no longer in the pool';
+  const rules = await loadRules(cfg);
+  const [requests, slots] = await Promise.all([
+    store.requestsSince(cfg.client, new Date(since).toISOString()),
+    store.slotsBetween(cfg.client, from, today),
+  ]);
+
+  // Coverage: finished hours in the window that had their full headcount.
+  let total = 0; let covered = 0; const shortHours = new Map();
+  for (let day = from; day <= today; day = nextDateKey(day)) {
+    for (const h of dayCoverage(cfg, day, rules, weekdayOf(day)).hours) {
+      if (hourStart(day, h, cfg.timezone) + HOUR > now) continue;
+      total++;
+      const n = slots.filter((x) => asDay(x.day) === day && x.hour === h && x.status === 'active').length;
+      if (n >= headcountFor(cfg, h)) covered++;
+      else shortHours.set(hourLabel(h), (shortHours.get(hourLabel(h)) || 0) + 1);
+    }
+  }
+
+  // Swaps.
+  const escalateMs = (cfg.claim?.escalateAfterMinutes ?? 3) * 60_000;
+  const claimed = requests.filter((r) => r.status === 'claimed');
+  const claimMs = claimed.map((r) => Date.parse(r.claimed_at) - Date.parse(r.requested_at));
+  const slow = claimMs.filter((ms) => ms > escalateMs).length;
+  const missed = requests.filter((r) => r.status === 'open' && Date.parse(r.appt_start) < now).length;
+  const creditIssues = claimed.filter((r) => r.reassign_error).length;
+
+  const tally = (arr, key) => {
+    const m = new Map();
+    for (const x of arr) if (x[key]) m.set(x[key], (m.get(x[key]) || 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1]);
+  };
+  const list = (pairs, n = 5) => (pairs.length ? pairs.slice(0, n).map(([id, c]) => `${name(id)} (${c})`).join(', ') : 'none');
+
+  const inWindow = (t) => t && Date.parse(t) >= since;
+  const released = tally(slots.filter((x) => x.status === 'released' && inWindow(x.released_at)), 'ghl_user_id');
+  const pickedUp = tally(slots.filter((x) => x.source === 'volunteer' && inWindow(x.created_at)), 'ghl_user_id');
+  const pct = total ? Math.round((covered / total) * 100) : null;
+  const shortList = [...shortHours].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([h, c]) => `${h} (${c}x)`).join(', ');
+
+  return [
+    `*Hot-swap insights: last ${days} day${days === 1 ? '' : 's'}* (${formatDay(from)} to ${formatDay(today)})`,
+    '',
+    '*Coverage*',
+    `• ${pct == null ? 'No finished coverage hours yet' : `${pct}% of hours fully covered (${covered}/${total})`}`,
+    shortHours.size ? `• Most often short: ${shortList}` : '• No short hours',
+    '',
+    '*Hot swaps*',
+    `• ${requests.length} requested, ${claimed.length} claimed${missed ? `, *${missed} never claimed*` : ''}`,
+    `• Median time to claim: ${mins(median(claimMs))}${slow ? ` · ${slow} took longer than ${cfg.claim?.escalateAfterMinutes ?? 3} min` : ''}`,
+    creditIssues ? `• ${creditIssues} claim(s) where GHL credit didn't fully update` : null,
+    '',
+    '*People*',
+    `• Handed off the most calls: ${list(tally(requests, 'from_ghl_user_id'))}`,
+    `• Took the most calls: ${list(tally(claimed, 'claimed_by_ghl'))}`,
+    `• Picked up the most open hours: ${list(pickedUp)}`,
+    `• Released the most hours: ${list(released)}`,
+  ].filter((l) => l !== null).join('\n');
 }
 
 // ---------- coverage exceptions (/hotswap dates) ----------
@@ -574,11 +701,6 @@ export async function createSwapRequest(cfg, { ghl, slack, team, appointmentId, 
   const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: cfg.timezone, hour: 'numeric', hourCycle: 'h23' }).format(new Date(start)));
   const onCallRows = (await store.activeSlots(cfg.client, day)).filter((r) => r.hour === hour && r.ghl_user_id !== appt.assignedUserId);
   const onCallPeople = onCallRows.map((r) => team.byId.get(r.ghl_user_id)).filter(Boolean);
-  console.log('swap request on-call lookup', JSON.stringify({
-    appointmentId, rawStart: appt.startTime, start: new Date(start).toISOString(), day, hour,
-    owner: appt.assignedUserId, rowsThatHour: onCallRows.map((r) => r.ghl_user_id),
-    matchedPeople: onCallPeople.map((p) => p.name), poolIds: [...team.byId.keys()],
-  }));
 
   const escalateMs = (cfg.claim?.escalateAfterMinutes ?? 3) * 60_000;
   const urgent = start - Date.now() <= escalateMs || !onCallPeople.length;

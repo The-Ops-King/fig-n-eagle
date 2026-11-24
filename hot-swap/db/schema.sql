@@ -87,3 +87,12 @@ CREATE TABLE IF NOT EXISTS coverage_rules (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (client, kind, key)
 );
+
+-- One "still needs cover" board per day: tags the pool, one button per open hour.
+CREATE TABLE IF NOT EXISTS gap_boards (
+  client   TEXT NOT NULL,
+  day      DATE NOT NULL,
+  channel  TEXT NOT NULL,
+  ts       TEXT NOT NULL,
+  PRIMARY KEY (client, day)
+);

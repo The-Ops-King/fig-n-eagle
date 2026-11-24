@@ -2,12 +2,13 @@
 // across daylight-saving changes and each client can pick its own times:
 //   schedule.planHour    (default 18): plan TOMORROW, block hours in GHL, post plan, DM manager
 //   schedule.confirmHour (default 7):  re-check TODAY, fill new openings, post today's roster
+//   schedule.escalateHour (default 21): DM the manager tomorrow's hours nobody has picked up
 //
 // Manual run (testing):  GET /api/cron/tick?phase=plan|confirm[&day=YYYY-MM-DD]
 //   with header  Authorization: Bearer $CRON_SECRET
 import { context } from '../../lib/context.js';
 import { dateKey, nextDateKey, parts } from '../../lib/time.js';
-import { publishRoster, sweepCoverMessages } from '../../lib/service.js';
+import { publishRoster, sweepCoverMessages, escalateGaps } from '../../lib/service.js';
 
 export async function GET(request) {
   if (request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -23,7 +24,11 @@ export async function GET(request) {
   const confirmHour = cfg.schedule?.confirmHour ?? 7;
 
   // Every hour: drop "needs cover" messages for hours that got covered or are over.
-  await sweepCoverMessages(cfg, ctx.slack).catch((e) => console.error('sweep failed', e));
+  await sweepCoverMessages(cfg, ctx.slack, now, ctx.team).catch((e) => console.error('sweep failed', e));
+  if (!url.searchParams.get('phase') && localHour === (cfg.schedule?.escalateHour ?? 21)) {
+    await escalateGaps(cfg, ctx, nextDateKey(today)).catch((e) => console.error('escalation failed', e));
+    return Response.json({ escalated: true });
+  }
 
   let phase = url.searchParams.get('phase');
   if (!phase) phase = localHour === planHour ? 'plan' : localHour === confirmHour ? 'confirm' : null;

@@ -50,7 +50,8 @@
   },
   "schedule": {
     "planHour": 18,
-    "confirmHour": 7
+    "confirmHour": 7,
+    "escalateHour": 21
   },
   "claim": {
     "escalateAfterMinutes": 3

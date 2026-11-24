@@ -154,3 +154,25 @@ export async function setCoverageRule({ client, kind, key, mode, firstHour, last
 export async function clearCoverageRule(client, kind, key) {
   await db()`DELETE FROM coverage_rules WHERE client = ${client} AND kind = ${kind} AND key = ${key}`;
 }
+
+export async function getGapBoard(client, day) {
+  const rows = await db()`SELECT * FROM gap_boards WHERE client = ${client} AND day = ${day}`;
+  return rows[0] || null;
+}
+
+export async function saveGapBoard(client, day, channel, ts) {
+  await db()`INSERT INTO gap_boards (client, day, channel, ts) VALUES (${client}, ${day}, ${channel}, ${ts})
+             ON CONFLICT (client, day) DO UPDATE SET channel = EXCLUDED.channel, ts = EXCLUDED.ts`;
+}
+
+export async function deleteGapBoard(client, day) {
+  await db()`DELETE FROM gap_boards WHERE client = ${client} AND day = ${day}`;
+}
+
+export async function requestsSince(client, sinceIso) {
+  return db()`SELECT * FROM swap_requests WHERE client = ${client} AND requested_at >= ${sinceIso}`;
+}
+
+export async function slotsBetween(client, fromDay, toDay) {
+  return db()`SELECT * FROM roster_slots WHERE client = ${client} AND day >= ${fromDay} AND day <= ${toDay}`;
+}

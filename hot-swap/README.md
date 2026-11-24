@@ -6,8 +6,9 @@ Makes sure someone is always lined up to take a closer's call when the closer ca
 
 | When | What happens |
 |---|---|
-| **6 PM ET, night before** | Builds tomorrow's roster from GHL availability and **puts each on-call hour on that person's calendar** as an appointment on the "Hot Swap On-Call" GHL calendar. It syncs to their Google Calendar and makes them busy, so round robin can't book them (including overnight), posts "Tomorrow's hot-swap plan", and DMs the manager any gaps so cover can be lined up tonight. |
-| **7 AM ET, morning of** | Re-checks today. Keeps everyone already assigned, fills any gaps with people who became free overnight, posts "Today's hot-swap roster", and DMs the manager what's still open. |
+| **9 PM ET** | DMs the manager only if some of tomorrow's hours are still uncovered. |
+| **6 PM ET, night before** | Builds tomorrow's roster from GHL availability and **puts each on-call hour on that person's calendar** as an appointment on the "Hot Swap On-Call" GHL calendar. It syncs to their Google Calendar and makes them busy, so round robin can't book them (including overnight), posts "Tomorrow's hot-swap plan", . If any hour can't be filled, posts one **"still needs cover" board** tagging the pool **once**, with an "I'll cover" button per open hour; it's edited silently as hours fill and deleted when nothing is open. |
+| **7 AM ET, morning of** | Re-checks today. Keeps everyone already assigned, fills any gaps with people who became free overnight, posts "Today's hot-swap roster", updates the board, and DMs the manager only if something is still open. |
 | **"Can't make my hour"** | Removes their on-call appointment, marks the hour **NOT COVERED** on the roster, and posts an **"I'll cover"** button in the thread tagging whoever is free (or the manager if nobody is). Whoever clicks gets the hour. |
 | **"Cover an hour"** | Anyone in the pool can take an hour that still needs people (up to its headcount), if their calendar is free. The hour already under way can be taken any time unless they have a call during the rest of it; its on-call appointment starts now. |
 | **Hot swap request** (`/hotswap`, the global shortcut, or the roster button) | Closer picks one of their next calls. The bot tags whoever is on call that hour. **First to click "I've got it" wins**: the deal owner and contact owner move to them (they get the credit) and a note is added to the contact. The appointment stays on its calendar under the original closer, because GHL only lets calendar team members own appointments. No claim after 3 min: it escalates to the whole pool plus the manager. Calls starting within 3 min, or hours with nobody on call, go to everyone immediately. |
@@ -56,6 +57,7 @@ On-call shifts are appointments on a dedicated GHL calendar (`ghl.onCall.calenda
 | `/hotswap help` | anyone | explain commands and buttons |
 | `/hotswap today` / `/hotswap tomorrow` | manager | build or refresh the roster now (edits the existing message) |
 | `/hotswap add @name` / `/hotswap remove @name` | manager | change the pool |
+| `/hotswap insights [days]` | manager | last 7 (or N) days: % of hours fully covered and which hours run short; swaps requested/claimed/never claimed, median time to claim; who hands off, takes, picks up and releases the most |
 | `/hotswap dates` | manager | coverage exceptions: turn a date off or set custom hours (holidays), or set a weekly rule for a weekday (weekends). Date rules beat weekly rules, which beat the config. Changes to today/tomorrow apply immediately: on-call appointments outside the new hours are cancelled and new hours are filled. |
 
 ## Day-to-day config (`config/<client>.json`)
