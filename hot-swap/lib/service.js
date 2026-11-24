@@ -475,16 +475,19 @@ export async function refreshGapBoard(cfg, { slack, team }, day, { post = false 
   }
 }
 
-// Tell the manager about hours nobody has taken. Silent when everything is covered.
+// Tell the manager about hours nobody has taken, once per hour: an hour already reported
+// is never repeated. Silent when everything is covered.
 export async function escalateGaps(cfg, { slack, team }, day) {
   if (!team.manager.slackUserId) return;
-  const open = await coverableHours(cfg, day);
+  const already = await store.alertedHours(cfg.client, day);
+  const open = (await coverableHours(cfg, day)).filter((h) => !already.has(h.hour));
   if (!open.length) return;
   const today = dateKey(Date.now(), cfg.timezone);
   const when = day === today ? 'today' : 'tomorrow';
   const list = open.map((h) => `• ${hourLabel(h.hour)} ET${h.need > 1 ? ` (needs ${h.need})` : ''}`).join('\n');
   await slack.dm(team.manager.slackUserId,
     `Nobody has picked up these hot-swap hours for ${when} (${formatDay(day)}):\n${list}\nThe pool was already tagged. You may need to line someone up.`);
+  await store.markAlerted(cfg.client, day, open.map((h) => h.hour));
 }
 
 // ---------- insights ----------

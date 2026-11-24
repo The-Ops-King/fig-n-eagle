@@ -176,3 +176,14 @@ export async function requestsSince(client, sinceIso) {
 export async function slotsBetween(client, fromDay, toDay) {
   return db()`SELECT * FROM roster_slots WHERE client = ${client} AND day >= ${fromDay} AND day <= ${toDay}`;
 }
+
+export async function alertedHours(client, day) {
+  const rows = await db()`SELECT hour FROM manager_alerts WHERE client = ${client} AND day = ${day}`;
+  return new Set(rows.map((r) => Number(r.hour)));
+}
+
+export async function markAlerted(client, day, hours) {
+  for (const h of hours) {
+    await db()`INSERT INTO manager_alerts (client, day, hour) VALUES (${client}, ${day}, ${h}) ON CONFLICT DO NOTHING`;
+  }
+}

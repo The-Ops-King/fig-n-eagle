@@ -6,7 +6,7 @@ Makes sure someone is always lined up to take a closer's call when the closer ca
 
 | When | What happens |
 |---|---|
-| **9 PM ET** | DMs the manager only if some of tomorrow's hours are still uncovered. |
+| **9 PM ET** | DMs the manager only if some of tomorrow's hours are still uncovered. Each open hour is reported **once**: the 7 AM run only mentions hours that weren't in the 9 PM message. |
 | **6 PM ET, night before** | Builds tomorrow's roster from GHL availability and **puts each on-call hour on that person's calendar** as an appointment on the "Hot Swap On-Call" GHL calendar. It syncs to their Google Calendar and makes them busy, so round robin can't book them (including overnight), posts "Tomorrow's hot-swap plan", . If any hour can't be filled, posts one **"still needs cover" board** tagging the pool **once**, with an "I'll cover" button per open hour; it's edited silently as hours fill and deleted when nothing is open. |
 | **7 AM ET, morning of** | Re-checks today. Keeps everyone already assigned, fills any gaps with people who became free overnight, posts "Today's hot-swap roster", updates the board, and DMs the manager only if something is still open. |
 | **"Can't make my hour"** | Removes their on-call appointment, marks the hour **NOT COVERED** on the roster, and posts an **"I'll cover"** button in the thread tagging whoever is free (or the manager if nobody is). Whoever clicks gets the hour. |

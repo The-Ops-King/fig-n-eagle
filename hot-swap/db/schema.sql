@@ -96,3 +96,12 @@ CREATE TABLE IF NOT EXISTS gap_boards (
   ts       TEXT NOT NULL,
   PRIMARY KEY (client, day)
 );
+
+-- Hours the manager has already been told about, so each open hour is reported once.
+CREATE TABLE IF NOT EXISTS manager_alerts (
+  client   TEXT     NOT NULL,
+  day      DATE     NOT NULL,
+  hour     SMALLINT NOT NULL,
+  sent_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (client, day, hour)
+);
