@@ -139,6 +139,14 @@ export function ghlClient(cfg, { fetchImpl = fetch, token = process.env[cfg.ghl.
       return res.appointment || res.event || res;
     },
 
+    // null when the event no longer exists.
+    async findEvent(eventId) {
+      try { return await this.getAppointment(eventId); } catch (e) {
+        if (e.status === 404 || e.status === 400) return null;
+        throw e;
+      }
+    },
+
     // Hand the appointment to a new owner. The receiver's own on-call block covers this
     // hour, so free-slot validation must be skipped.
     async reassignAppointment(eventId, userId) {

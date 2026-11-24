@@ -114,6 +114,7 @@ export async function buildRoster(cfg, { ghl, team, day, apply, now = Date.now()
   const hours = hoursToCover(cfg, day, now);
   if (!hours.length) return { day, hours, assignments: new Map(), gaps: [], errors: [] };
 
+  const repairErrors = apply ? await repairSlots(cfg, ghl, team, day) : [];
   const existing = apply ? await store.activeSlots(cfg.client, day) : [];
   const locked = new Map();
   for (const s of existing) locked.set(s.hour, [...(locked.get(s.hour) || []), s.ghl_user_id]);
@@ -127,7 +128,7 @@ export async function buildRoster(cfg, { ghl, team, day, apply, now = Date.now()
     locked,
   });
 
-  const errors = avail.filter((p) => p.error).map((p) => `${p.name}: ${p.error}`);
+  const errors = [...repairErrors, ...avail.filter((p) => p.error).map((p) => `${p.name}: ${p.error}`)];
   if (apply) {
     for (const [hour, ids] of plan.assignments) {
       for (const id of ids) {
@@ -141,6 +142,34 @@ export async function buildRoster(cfg, { ghl, team, day, apply, now = Date.now()
     }
   }
   return { day, hours, ...plan, errors };
+}
+
+// Make sure every assigned hour really has an on-call appointment in GHL:
+// - no event id, or a leftover blocked slot from before appointments  -> replace with an appointment
+// - the appointment was deleted/cancelled in GHL                      -> free the hour (planner refills it)
+async function repairSlots(cfg, ghl, team, day) {
+  const errors = [];
+  const onCal = cfg.ghl.onCall.calendarId;
+  for (const slot of await store.activeSlots(cfg.client, day)) {
+    if (hourStart(day, slot.hour, cfg.timezone) + HOUR <= Date.now()) continue;
+    const name = team.byId.get(slot.ghl_user_id)?.name || slot.ghl_user_id;
+    try {
+      const ev = slot.block_event_id ? await ghl.findEvent(slot.block_event_id) : null;
+      const isOnCall = ev && ev.calendarId === onCal;
+      const gone = !ev || ev.deleted || ['cancelled', 'invalid'].includes(ev.appointmentStatus);
+      if (isOnCall && !gone) continue;
+      if (isOnCall && gone) { await store.releaseSlot(slot.id); continue; }
+      // Legacy block (or missing id): convert to an on-call appointment.
+      if (slot.block_event_id) await ghl.deleteEvent(slot.block_event_id).catch(() => {}); // remove leftover block
+      if (!team.byId.has(slot.ghl_user_id)) { await store.releaseSlot(slot.id); continue; }
+      const start = hourStart(day, slot.hour, cfg.timezone);
+      const id = await ghl.createOnCall({ userId: slot.ghl_user_id, startMs: start, endMs: start + HOUR, title: cfg.blockTitle });
+      await store.setSlotEvent(slot.id, id);
+    } catch (e) {
+      errors.push(`${name} ${hourLabel(slot.hour)}: ${e.message}`);
+    }
+  }
+  return errors;
 }
 
 async function assignHour(cfg, ghl, { day, hour, ghlUserId, source }) {

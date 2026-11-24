@@ -117,3 +117,7 @@ export async function futureSlotsFor(client, ghlUserId, fromDay) {
   return db()`SELECT * FROM roster_slots WHERE client = ${client} AND ghl_user_id = ${ghlUserId}
               AND status = 'active' AND day >= ${fromDay} ORDER BY day, hour`;
 }
+
+export async function setSlotEvent(id, eventId) {
+  await db()`UPDATE roster_slots SET block_event_id = ${eventId} WHERE id = ${id}`;
+}
