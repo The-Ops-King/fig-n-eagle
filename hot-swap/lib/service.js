@@ -719,18 +719,33 @@ export async function createSwapRequest(cfg, { ghl, slack, team, appointmentId, 
   const msg = requestBlocks(cfg, team, req, { onCall: onCallText, headline: '🔥 *Hot swap needed*' });
   const posted = await slack.post(cfg.slack.channelId, msg.text, msg.blocks);
 
-  let escalationId = null;
-  if (!urgent) {
+  // Already went to everyone: mark it so the escalation job leaves it alone.
+  if (urgent) await store.markEscalated(req.id);
+  await store.setRequestMessage(req.id, posted.channel, posted.ts, null);
+  return { ok: true, message: 'Posted. Stay on your current call. Someone will claim it.' };
+}
+
+// Runs every minute. Escalates only requests that are still unclaimed right now, so a claim
+// can never be followed by an "unclaimed" alert.
+export async function escalateRequests(cfg, { slack, team }, now = Date.now()) {
+  const afterMs = (cfg.claim?.escalateAfterMinutes ?? 3) * 60_000;
+  const due = await store.dueEscalations(cfg.client, new Date(now - afterMs).toISOString(), new Date(now - 30 * 60_000).toISOString());
+  for (const r of due) {
+    const req = await store.markEscalated(r.id);
+    if (!req) continue; // claimed or escalated in the meantime
+    const everyone = team.people.filter((p) => p.slackUserId && p.slackUserId !== req.from_slack_user_id);
+    const allMentions = [...everyone.map((p) => `<@${p.slackUserId}>`), mention(team.manager.slackUserId, team.manager.name)].join(' ');
     const esc = requestBlocks(cfg, team, req, {
       headline: `⏰ *Unclaimed after ${cfg.claim?.escalateAfterMinutes ?? 3} min.* Anyone free?`,
       onCall: allMentions,
     });
-    const sched = await slack.schedule(cfg.slack.channelId, Math.floor((Date.now() + escalateMs) / 1000), esc.text, esc.blocks,
-      { thread_ts: posted.ts, reply_broadcast: true });
-    escalationId = sched.scheduled_message_id;
+    const posted = await slack.post(req.channel || cfg.slack.channelId, esc.text, esc.blocks, { thread_ts: req.ts, reply_broadcast: true });
+    await store.setEscalationTs(req.id, posted.ts);
+    // Claimed while we were posting: remove the alert again.
+    const latest = await store.getRequest(req.id);
+    if (latest?.status !== 'open') await slack.remove(posted.channel, posted.ts).catch(() => {});
   }
-  await store.setRequestMessage(req.id, posted.channel, posted.ts, escalationId);
-  return { ok: true, message: 'Posted. Stay on your current call. Someone will claim it.' };
+  return due.length;
 }
 
 export async function claimSwap(cfg, { ghl, slack, team, requestId, slackUserId }) {
@@ -751,7 +766,10 @@ export async function claimSwap(cfg, { ghl, slack, team, requestId, slackUserId 
   const won = await store.claimRequest(req.id, me.ghlUserId, slackUserId);
   if (!won) return { ok: false, message: 'Someone else just claimed it.' };
 
-  if (req.escalation_msg_id) await slack.unschedule(req.channel, req.escalation_msg_id).catch(() => {});
+  // Escalation already posted? It's noise now that someone has it.
+  const fresh = await store.getRequest(req.id);
+  if (fresh?.escalation_ts) await slack.remove(req.channel, fresh.escalation_ts).catch(() => {});
+  if (req.escalation_msg_id) await slack.unschedule(req.channel, req.escalation_msg_id).catch(() => {}); // legacy scheduled alerts
 
   // Credit moves via the deal owner + contact owner. The appointment itself is left alone:
   // GHL only allows calendar team members as appointment owners, and A/B teams stay as they are.
