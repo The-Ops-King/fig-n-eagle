@@ -1,0 +1,35 @@
+# Paste into api.slack.com/apps -> Create New App -> From an app manifest.
+# Replace YOUR-DEPLOYMENT with the Vercel production domain.
+display_information:
+  name: Hot Swap
+  description: Hot-swap coverage roster and transfer routing for closer calls.
+  background_color: "#1f2937"
+features:
+  bot_user:
+    display_name: Hot Swap
+    always_online: true
+  shortcuts:
+    - name: Request a hot swap
+      type: global
+      callback_id: hot_swap_request
+      description: Hand off one of your upcoming calls
+  slash_commands:
+    - command: /hotswap
+      url: https://YOUR-DEPLOYMENT/api/slack/commands
+      description: Request a hot swap for one of your upcoming calls
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - commands
+      - im:write
+      - users:read
+      - users:read.email
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://YOUR-DEPLOYMENT/api/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

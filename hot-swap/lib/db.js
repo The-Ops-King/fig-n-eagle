@@ -1,0 +1,76 @@
+import { neon } from '@neondatabase/serverless';
+
+let sql;
+export function db() {
+  if (!sql) {
+    if (!process.env.DATABASE_URL) throw new Error('Missing env DATABASE_URL');
+    sql = neon(process.env.DATABASE_URL);
+  }
+  return sql;
+}
+
+export async function activeSlots(client, day) {
+  return db()`SELECT * FROM roster_slots WHERE client = ${client} AND day = ${day} AND status = 'active' ORDER BY hour, id`;
+}
+
+export async function insertSlot({ client, day, hour, ghlUserId, blockEventId, source }) {
+  const rows = await db()`
+    INSERT INTO roster_slots (client, day, hour, ghl_user_id, block_event_id, source)
+    VALUES (${client}, ${day}, ${hour}, ${ghlUserId}, ${blockEventId}, ${source})
+    ON CONFLICT DO NOTHING
+    RETURNING *`;
+  return rows[0] || null;
+}
+
+export async function releaseSlot(id) {
+  const rows = await db()`
+    UPDATE roster_slots SET status = 'released', released_at = now()
+    WHERE id = ${id} AND status = 'active' RETURNING *`;
+  return rows[0] || null;
+}
+
+export async function getRosterPost(client, day) {
+  const rows = await db()`SELECT * FROM roster_posts WHERE client = ${client} AND day = ${day}`;
+  return rows[0] || null;
+}
+
+export async function saveRosterPost(client, day, channel, ts) {
+  await db()`
+    INSERT INTO roster_posts (client, day, channel, ts) VALUES (${client}, ${day}, ${channel}, ${ts})
+    ON CONFLICT (client, day) DO UPDATE SET channel = EXCLUDED.channel, ts = EXCLUDED.ts`;
+}
+
+export async function createRequest(r) {
+  const rows = await db()`
+    INSERT INTO swap_requests
+      (client, appointment_id, calendar_id, contact_id, contact_name, appt_start,
+       from_ghl_user_id, from_slack_user_id, reason)
+    VALUES (${r.client}, ${r.appointmentId}, ${r.calendarId}, ${r.contactId}, ${r.contactName},
+            ${new Date(r.apptStart).toISOString()}, ${r.fromGhlUserId}, ${r.fromSlackUserId}, ${r.reason})
+    ON CONFLICT DO NOTHING
+    RETURNING *`;
+  return rows[0] || null;
+}
+
+export async function setRequestMessage(id, channel, ts, escalationMsgId) {
+  await db()`UPDATE swap_requests SET channel = ${channel}, ts = ${ts}, escalation_msg_id = ${escalationMsgId} WHERE id = ${id}`;
+}
+
+// Atomic: only the first claimer wins.
+export async function claimRequest(id, ghlUserId, slackUserId) {
+  const rows = await db()`
+    UPDATE swap_requests
+    SET status = 'claimed', claimed_at = now(), claimed_by_ghl = ${ghlUserId}, claimed_by_slack = ${slackUserId}
+    WHERE id = ${id} AND status = 'open'
+    RETURNING *`;
+  return rows[0] || null;
+}
+
+export async function setReassignError(id, message) {
+  await db()`UPDATE swap_requests SET reassign_error = ${message} WHERE id = ${id}`;
+}
+
+export async function getRequest(id) {
+  const rows = await db()`SELECT * FROM swap_requests WHERE id = ${id}`;
+  return rows[0] || null;
+}

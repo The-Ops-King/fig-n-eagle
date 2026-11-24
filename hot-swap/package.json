@@ -1,0 +1,16 @@
+{
+  "name": "hot-swap",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hot-swap coverage roster and transfer routing for closer calls (Slack + GoHighLevel).",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "preview": "node scripts/preview.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.0",
+    "@vercel/functions": "3.11.0"
+  }
+}
