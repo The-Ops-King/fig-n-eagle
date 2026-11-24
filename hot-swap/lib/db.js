@@ -1,12 +1,37 @@
 import { neon } from '@neondatabase/serverless';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
-let sql;
-export function db() {
-  if (!sql) {
-    if (!process.env.DATABASE_URL) throw new Error('Missing env DATABASE_URL');
-    sql = neon(process.env.DATABASE_URL);
+const SCHEMA = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'db', 'schema.sql'), 'utf8');
+
+let raw;
+let ready;
+
+// Tables are created on first use (schema.sql is idempotent), so there's no manual setup step.
+async function ensureSchema() {
+  const statements = SCHEMA.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n')
+    .split(';').map((s) => s.trim()).filter(Boolean);
+  for (const st of statements) await raw.query(st);
+}
+
+function conn() {
+  if (!raw) {
+    const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    if (!url) throw new Error('Missing env DATABASE_URL (connect Neon to this Vercel project)');
+    raw = neon(url);
   }
-  return sql;
+  return raw;
+}
+
+// Tagged-template SQL that waits for the schema on first call.
+export function db() {
+  conn();
+  return async (strings, ...values) => {
+    ready ??= ensureSchema().catch((e) => { ready = undefined; throw e; });
+    await ready;
+    return raw(strings, ...values);
+  };
 }
 
 export async function activeSlots(client, day) {

@@ -31,20 +31,20 @@ slack-manifest.yaml        Slack app definition
 
 ## Setup (one time)
 1. **Vercel project**: import this repo, set **Root Directory = `hot-swap`**.
-2. **Database**: Vercel → Storage → add **Neon Postgres** to the project (sets `DATABASE_URL`). Run `db/schema.sql` in the Neon SQL editor.
+2. **Database**: Vercel → Storage → add **Neon Postgres** to the project (sets `DATABASE_URL`). Tables are created automatically on first use.
 3. **GHL token**: in the sub-account, Settings → Private Integrations → new token with `calendars.readonly`, `calendars/events.readonly`, `calendars/events.write`, `contacts.readonly`, `users.readonly`. Use a dedicated token for this app.
 4. **Slack app**: api.slack.com/apps → Create New App → From manifest → paste `slack-manifest.yaml` with your Vercel domain in place of `YOUR-DEPLOYMENT`. Install to the workspace. Invite the bot to the hot-transfer channel (`/invite @Hot Swap`).
 5. **Env vars** (Vercel → Settings → Environment Variables), see `.env.example`:
    `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `CRON_SECRET`, `GHL_PIT_FIG_N_EAGLE`, `HOT_SWAP_CLIENT=fig-n-eagle`.
 6. **Config**: `config/fig-n-eagle.json` has `slack.channelId` (currently #sd-call-transfer) and Slack IDs for David and Rosaline already set. For anyone else whose GHL email isn't their Slack email, set `slackUserId`.
-7. Deploy. Then trigger a run by hand:
-   `curl -H "Authorization: Bearer $CRON_SECRET" "https://<domain>/api/cron/tick?phase=confirm"` (today) or `?phase=plan` (tomorrow).
+7. Deploy. The database tables are created automatically on first use. To run the roster now instead of waiting for the schedule, the manager types `/hotswap roster` (today) or `/hotswap plan` (tomorrow) in Slack.
 
 ## Day-to-day config (`config/<client>.json`)
 - `pool`: who can be on call. Add setters with `"role": "setter"` and their own GHL calendar as `availabilityCalendarId`. Set `"active": false` to pause someone.
 - `coverage.firstHour` / `lastHour`: local hours (8 → 20 means 8 AM through the 8 PM hour, i.e. 8 AM ET to 5 PM PT).
 - `coverage.days`: 0 = Sunday … 6 = Saturday.
 - `coverage.headcount`: people per hour (`byHour` overrides `default`).
+- `coverage.minFreeMinutes`: how long someone must be free from the top of an hour to cover it (default 45, one call).
 - `schedule.planHour` / `confirmHour`: local hours for the night-before plan and the morning confirm.
 - `claim.escalateAfterMinutes`: when an unclaimed request goes to everyone.
 

@@ -1,5 +1,3 @@
-import { HOUR } from './time.js';
-
 // Turn bookable slot starts into continuous free intervals.
 // A slot at s means [s, s + duration) is bookable. Consecutive slots exactly `interval`
 // apart mean the time between them is free too (covers calendars where duration < interval).
@@ -25,7 +23,10 @@ export function covers(intervals, start, end) {
   return intervals.some(([s, e]) => s <= start && e >= end);
 }
 
-// Which of the given hour starts is this person free for the full hour?
-export function freeHours(intervals, hourStarts) {
-  return hourStarts.filter((h) => covers(intervals, h, h + HOUR));
+// Which of the given hour starts can this person cover? They must be free from the top of the
+// hour for `minFreeMinutes` (default: one full 45-minute call). Requiring the full 60 minutes
+// would rule out everyone's last hour, because the final slot of a day only spans one call.
+export function freeHours(intervals, hourStarts, minFreeMinutes = 45) {
+  const need = Math.min(minFreeMinutes, 60) * 60_000;
+  return hourStarts.filter((h) => covers(intervals, h, h + need));
 }

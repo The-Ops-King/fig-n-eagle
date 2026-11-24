@@ -49,9 +49,18 @@
       "ghlUserId": "0P99eWr8BKMRUjWmYYlZ",
       "email": "jtyler@catalyst.surf",
       "role": "closer",
-      "availabilityCalendarId": "SET_JT_TEST_CALENDAR_ID",
+      "availabilityCalendarId": "t3MGzAKMpNBBJbme1A6o",
       "active": true,
       "slackUserId": "U0CCS9JKRCK"
+    },
+    {
+      "name": "Khaled",
+      "ghlUserId": "JJKPzzh2rYrFaHenMW1q",
+      "email": "khaled@catalyst.surf",
+      "role": "closer",
+      "availabilityCalendarId": "lVXHHQBMiVkwgO5L4zXW",
+      "active": true,
+      "slackUserId": "U0A834ENM3L"
     }
   ]
 }
