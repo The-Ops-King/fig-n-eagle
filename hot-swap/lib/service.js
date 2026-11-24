@@ -408,6 +408,32 @@ export async function assignHourTo(cfg, ctx, { day, hour, slackUserId, by }) {
   return { ok: true, message: `${person.name} is on call at ${hourLabel(hour)} ET on ${formatDay(day)}. They've been told.` };
 }
 
+// Delete "needs cover" messages for hours that are now fully covered or already over,
+// so the channel only shows hours that still need someone.
+export async function clearCoverMessages(cfg, slack, day) {
+  const byHour = await currentRoster(cfg, day);
+  const hours = await hoursForDay(cfg, day);
+  for (const m of await store.coverMessages(cfg.client, day)) {
+    const full = (byHour.get(m.hour) || []).length >= headcountFor(cfg, m.hour);
+    const over = hourStart(day, m.hour, cfg.timezone) + HOUR <= Date.now();
+    const dropped = !hours.includes(m.hour);
+    if (!full && !over && !dropped) continue;
+    await slack.remove(m.channel, m.ts).catch((e) => { if (e.slackError !== 'message_not_found') throw e; });
+    await store.removeCoverMessage(m.channel, m.ts);
+  }
+}
+
+// Hourly housekeeping: today's covered/finished requests plus anything left from earlier days.
+export async function sweepCoverMessages(cfg, slack, now = Date.now(), team) {
+  const today = dateKey(now, cfg.timezone);
+  await clearCoverMessages(cfg, slack, today);
+  if (team) await refreshGapBoard(cfg, { slack, team }, today);
+  for (const m of await store.staleCoverMessages(cfg.client, today)) {
+    await slack.remove(m.channel, m.ts).catch(() => {});
+    await store.removeCoverMessage(m.channel, m.ts);
+  }
+}
+
 export async function openHoursFor(cfg, day) {
   const byHour = await currentRoster(cfg, day);
   return (await hoursToCover(cfg, day)).filter((h) => (byHour.get(h) || []).length < headcountFor(cfg, h));
