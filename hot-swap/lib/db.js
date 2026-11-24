@@ -187,21 +187,3 @@ export async function markAlerted(client, day, hours) {
     await db()`INSERT INTO manager_alerts (client, day, hour) VALUES (${client}, ${day}, ${h}) ON CONFLICT DO NOTHING`;
   }
 }
-
-// Open requests old enough to escalate and not escalated yet (skip calls that started long ago).
-export async function dueEscalations(client, cutoffIso, oldestApptIso) {
-  return db()`SELECT * FROM swap_requests
-              WHERE client = ${client} AND status = 'open' AND escalated_at IS NULL
-                AND requested_at <= ${cutoffIso} AND appt_start >= ${oldestApptIso}`;
-}
-
-// Atomic: only one runner escalates a request, and never after it was claimed.
-export async function markEscalated(id) {
-  const rows = await db()`UPDATE swap_requests SET escalated_at = now()
-                          WHERE id = ${id} AND status = 'open' AND escalated_at IS NULL RETURNING *`;
-  return rows[0] || null;
-}
-
-export async function setEscalationTs(id, ts) {
-  await db()`UPDATE swap_requests SET escalation_ts = ${ts} WHERE id = ${id}`;
-}

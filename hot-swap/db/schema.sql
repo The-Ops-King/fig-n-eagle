@@ -105,7 +105,3 @@ CREATE TABLE IF NOT EXISTS manager_alerts (
   sent_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (client, day, hour)
 );
-
--- Escalation is decided at send time by a per-minute job (no pre-scheduled Slack messages).
-ALTER TABLE swap_requests ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ;
-ALTER TABLE swap_requests ADD COLUMN IF NOT EXISTS escalation_ts TEXT;
