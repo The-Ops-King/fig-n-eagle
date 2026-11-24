@@ -574,6 +574,11 @@ export async function createSwapRequest(cfg, { ghl, slack, team, appointmentId, 
   const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: cfg.timezone, hour: 'numeric', hourCycle: 'h23' }).format(new Date(start)));
   const onCallRows = (await store.activeSlots(cfg.client, day)).filter((r) => r.hour === hour && r.ghl_user_id !== appt.assignedUserId);
   const onCallPeople = onCallRows.map((r) => team.byId.get(r.ghl_user_id)).filter(Boolean);
+  console.log('swap request on-call lookup', JSON.stringify({
+    appointmentId, rawStart: appt.startTime, start: new Date(start).toISOString(), day, hour,
+    owner: appt.assignedUserId, rowsThatHour: onCallRows.map((r) => r.ghl_user_id),
+    matchedPeople: onCallPeople.map((p) => p.name), poolIds: [...team.byId.keys()],
+  }));
 
   const escalateMs = (cfg.claim?.escalateAfterMinutes ?? 3) * 60_000;
   const urgent = start - Date.now() <= escalateMs || !onCallPeople.length;
